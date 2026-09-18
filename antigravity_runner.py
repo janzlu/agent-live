@@ -39,12 +39,17 @@ class AccountPoolManager:
 
     def load_accounts(self):
         self.accounts = []
+        excluded_env = os.getenv("EXCLUDED_PRO_ACCOUNTS", "")
+        excluded_set = set(e.strip().lower() for e in excluded_env.split(",") if e.strip())
+
         if self.accounts_dir.exists():
             for p in sorted(self.accounts_dir.glob("*.json")):
                 try:
                     with open(p, "r") as f:
                         data = json.load(f)
                     email = data.get("email")
+                    if not email or email.strip().lower() in excluded_set:
+                        continue
                     tok = data.get("token", {})
                     if email and tok.get("access_token") and tok.get("refresh_token"):
                         if not any(a["email"] == email for a in self.accounts):
