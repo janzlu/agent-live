@@ -33,12 +33,55 @@ class AccountPoolManager:
         self.oauth_creds_file = Path.home() / ".gemini" / "oauth_creds.json"
         self.cli_token_file = Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
         self.google_accounts_file = Path.home() / ".gemini" / "google_accounts.json"
+        self.state_file = Path.home() / ".antigravity_tools" / "pool_state.json"
         self.accounts = []
         self.current_idx = 0
         self.load_accounts()
+        self.check_and_apply_cooldowns()
+
+    def _load_state(self) -> dict:
+        if self.state_file.exists():
+            try:
+                with open(self.state_file, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_state(self, state: dict):
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.state_file, "w") as f:
+                json.dump(state, f, indent=2)
+        except Exception:
+            pass
+
+    def check_and_apply_cooldowns(self):
+        """检查并更新 5 小时额度耗尽冷却状态"""
+        import time
+        state = self._load_state()
+        now = time.time()
+        for a in self.accounts:
+            email = a["email"]
+            acc_state = state.get(email)
+            if acc_state and not acc_state.get("is_healthy", True):
+                exhausted_at = acc_state.get("exhausted_at", 0)
+                cooldown_sec = acc_state.get("cooldown_hours", 5.0) * 3600
+                elapsed = now - exhausted_at
+                if elapsed < cooldown_sec:
+                    rem_min = max(1, int((cooldown_sec - elapsed) / 60))
+                    rem_str = f"{rem_min // 60}小时{rem_min % 60}分" if rem_min >= 60 else f"{rem_min}分钟"
+                    a["is_healthy"] = False
+                    a["disabled_reason"] = f"5h额度冷却中(余{rem_str})"
+                    a["exhausted_at"] = exhausted_at
+                else:
+                    # 5小时已过，自动解封恢复
+                    a["is_healthy"] = True
+                    a["disabled_reason"] = None
+                    acc_state["is_healthy"] = True
+                    self._save_state(state)
 
     def load_accounts(self):
-        self.accounts = []
         excluded_env = os.getenv("EXCLUDED_PRO_ACCOUNTS", "")
         excluded_set = set(e.strip().lower() for e in excluded_env.split(",") if e.strip())
 
@@ -72,15 +115,9 @@ class AccountPoolManager:
             self.accounts.sort(key=lambda a: ordered_emails.index(a["email"]) if a["email"] in ordered_emails else 999)
 
     def get_candidate_accounts(self):
-        """返回所有当前处于健康状态的 Pro 账号"""
+        """返回所有当前处于健康状态且未在 5h 冷却期的 Pro 账号"""
+        self.check_and_apply_cooldowns()
         candidates = [a for a in self.accounts if a["is_healthy"]]
-        if not candidates and self.accounts:
-            # 若所有账号都因临时限流标记，尝试整体重置一次
-            for a in self.accounts:
-                if a["disabled_reason"] != "地区资格限制":
-                    a["is_healthy"] = True
-                    a["disabled_reason"] = None
-            candidates = [a for a in self.accounts if a["is_healthy"]]
         return candidates
 
     def get_next_account(self) -> Optional[dict]:
@@ -99,11 +136,31 @@ class AccountPoolManager:
                 a["is_healthy"] = False
                 a["disabled_reason"] = reason
 
-    def mark_quota_exhausted(self, email: str, reason: str = "额度用尽"):
+    def mark_quota_exhausted(self, email: str, reason: str = "5小时额度耗尽(剩余<10%)"):
+        """标记账号 5 小时额度耗尽，记录冷却时间并持久化"""
+        import time
+        now = time.time()
         for a in self.accounts:
             if a["email"] == email:
                 a["is_healthy"] = False
                 a["disabled_reason"] = reason
+                a["exhausted_at"] = now
+
+        state = self._load_state()
+        state[email] = {
+            "is_healthy": False,
+            "disabled_reason": reason,
+            "exhausted_at": now,
+            "cooldown_hours": 5.0
+        }
+        self._save_state(state)
+
+        # 自动切换激活下一个可用账户
+        candidates = self.get_candidate_accounts()
+        if candidates:
+            self.activate_account(candidates[0])
+            sys.stdout.write(f"\n\033[1;32m[账号自动切换] 已自动切换至健康账户: {candidates[0]['email']}\033[0m\n")
+            sys.stdout.flush()
 
     def activate_account(self, acc: dict) -> bool:
         """
