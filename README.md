@@ -14,8 +14,10 @@
 2. **🔘 全局呼叫热键 (Push-to-Talk, `Ctrl+Space`)**：系统级全局捕获。无论您在 Cursor 中浏览代码、在浏览器查阅文档，还是在调试终端，随手一按即可开麦对讲。
 3. **📊 动态战况仪表盘 (Tactical HUD)**：直接内嵌在 IDE 底部终端，以丰富 ANSI 终端色彩实时可视化展现麦克风拾音能量条、当前对讲状态、实施工程师后台动作与实时伴随字幕。
 4. **👁️ Cursor & Antigravity 双源实时感知总线**：同时并发监听 Antigravity 与 Cursor 本地 Agent 对话转录（`~/.cursor/projects/<slug>/agent-transcripts/*.jsonl`），智能识别用户提问、工具调用（`Read`/`Write`/`Grep`/`Shell` 等）与任务结束事件，并在后台通过防抖总线进行语音伴随解说与战报播报。
-5. **🛠️ 本地工程直连执行引擎 (Direct Engineering Engine)**：支持通过口头下发指令（如*“帮我检查一下当前分支状态”*、*“跑一下所有单元测试并汇报”*），内置引擎直接在当前工作区安全执行并语音向您汇报军规级战报。
-6. **🛡️ 硬件回音抑制门限 (Echo Gate) 与双向隔离**：AI 开口回复瞬间自动毫秒级闭麦，彻底消灭外放扬声器引起的音频自激；平时保持静音，绝不干扰您的 Typeless 语音输入法或日常办公。
+5. **🚦 单通道优先级排队与双 IDE 冲突仲裁**：内置 `SpeechCoordinator` 与跨实例租约锁（`InterProcessSpeechLease`），彻底解决 Antigravity 与 Cursor 同时发声踩音问题。所有语音汇报统一按军规级优先级（异常预警 > 派单回报 > 任务完工 > 过程解说）串行化排队；瞬态解说自动覆盖去重；跨工作区多实例自动互斥让行。
+6. **🔇 系统媒体播放与会议声音智能避让**：内置 `AudioPlaybackDetector`，基于 macOS 核心音频机制（<12ms）精准感知 Apple Music、Spotify、Bilibili/YouTube 视频或腾讯会议、飞书、Zoom 等发声状态。当检测到长官正在播放媒体或开会通话时，**绝不冒然插话，自动在后台队列中安静排队**（HUD 动态提示 `[排队待播] 媒体播放中...`），待媒体停止且静音稳定后自动有序汇报。
+7. **🛠️ 本地工程直连执行引擎 (Direct Engineering Engine)**：支持通过口头下发指令（如*“帮我检查一下当前分支状态”*、*“跑一下所有单元测试并汇报”*），内置引擎直接在当前工作区安全执行并语音向您汇报军规级战报。
+8. **🛡️ 硬件回音抑制门限 (Echo Gate) 与双向隔离**：AI 开口回复瞬间自动毫秒级闭麦，彻底消灭外放扬声器引起的音频自激；平时保持静音，绝不干扰您的 Typeless 语音输入法或日常办公。
 
 ---
 
@@ -164,12 +166,15 @@ agent-live/
 ├── start.sh                  # 一键环境自检、依赖自愈与启动脚本
 ├── ensure_running.sh         # 跨 IDE 智能感知与唤醒器 (自动在 Cursor/Antigravity 中打开终端)
 ├── live_sidecar.py           # 核心引擎: Gemini 3.8 Live 双向多模态 WebSocket 管道、PTT调度与强占切断
+├── speech_coordinator.py     # 单通道排队调度器 (优先级排序、瞬态解说自动去重与过时丢弃)
+├── audio_monitor.py          # 系统媒体音频活动检测 (pmset/coreaudiod) 与跨进程播报互斥租约
 ├── ide_watcher.py            # IDE 动作感知总线 (支持 Antigravity 与 Cursor 双源对话转录监听、动作防抖聚合与字幕纯化)
 ├── antigravity_runner.py     # 本地工程直连执行引擎 (Direct Engine) 与自动化任务派单器
 ├── mcp_loader.py             # 标准 MCP 协议加载器与工具注册模块
 ├── .vscode/
 │   ├── tasks.json            # VS Code / Cursor 开箱即用任务配置文件
 │   └── settings.json         # 自动任务静默授权配置
+├── test_speech_queue.py      # 单通道语音排队、优先级调度与媒体声音避让测试套件
 ├── test_cursor_transcript_watcher.py # Cursor 转录监听、动作抽取与任务完成口播测试套件
 └── test_*.py                 # 针对强占打断、防抖聚合与执行引擎的单元与集成测试套件
 ```

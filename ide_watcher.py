@@ -393,9 +393,11 @@ def get_ide_chat_snapshot(use_cache: bool = True, workspace_root: Optional[str] 
                     content = entry.get("content", "")
                     if "<USER_REQUEST>" in content:
                         parts = content.split("<USER_REQUEST>")[1].split("</USER_REQUEST>")
-                        last_user_req = parts[0].strip()
+                        req_cand = parts[0].strip()
                     else:
-                        last_user_req = content.strip()
+                        req_cand = content.strip()
+                    if req_cand:
+                        last_user_req = req_cand
 
                     if "Active Document:" in content:
                         try:
@@ -529,28 +531,48 @@ class ActionBatcher:
         has_shell = any(t in ("run_command", "Shell", "AwaitShell") for t in tool_names)
 
         if has_modify and has_test:
-            narration = "核心代码修改已完成，正在拉起自动化测试集进行验证。"
+            files = [Path(d.split()[0]).name for t, d in actions if ("/" in d or "." in d) and not d.startswith("http")]
+            target = f"「{files[0]}」" if files and files[0] else "相关文件"
+            narration = f"已改完{target}等文件，正在拉起自动化测试做验证。"
         elif has_modify:
             files = [Path(d.split()[0]).name for t, d in actions if ("/" in d or "." in d) and not d.startswith("http")]
-            target = f" {files[0]}" if files and files[0] else ""
-            narration = f"正在编辑修改{target}并进行语法校验。"
+            uniq = []
+            for f in files:
+                if f and f not in uniq:
+                    uniq.append(f)
+            if len(uniq) >= 2:
+                narration = f"正在连续修改{uniq[0]}、{uniq[1]}等文件并做语法校验。"
+            elif uniq:
+                narration = f"正在编辑修改{uniq[0]}，并检查改动是否自洽。"
+            else:
+                narration = "正在编辑核心代码并做语法校验。"
         elif has_test:
-            narration = "正在运行目标单元测试与集成测试套件。"
+            narration = "正在运行目标单元测试与集成测试，稍后汇报通过情况。"
         elif has_git:
-            narration = "正在核对当前代码分支与版本工作区状态。"
+            narration = "正在核对当前分支、改动文件与提交状态。"
         elif has_shell:
-            narration = "正在执行终端命令推进工程步骤。"
+            cmd = sanitize_for_speech(descs[-1] if descs else "工程命令", max_chars=36)
+            narration = f"正在执行终端步骤：{cmd}。"
         elif has_view:
             files = [Path(d.split()[0]).name for t, d in actions if ("/" in d or "." in d) and not d.startswith("http")]
-            target = f" {files[0]}" if files and files[0] else ""
-            narration = f"已定位{target}代码逻辑，正在分析上下文。"
+            uniq = []
+            for f in files:
+                if f and f not in uniq:
+                    uniq.append(f)
+            count = len(actions)
+            if len(uniq) >= 2:
+                narration = f"已定位{uniq[0]}与{uniq[1]}等{count}处上下文，继续深入分析。"
+            elif uniq:
+                narration = f"已定位{uniq[0]}相关逻辑，正在补充上下文分析。"
+            else:
+                narration = f"正在检索并阅读相关代码上下文，已处理{count}个动作。"
         else:
-            latest_desc = sanitize_for_speech(descs[-1] if descs else "工程步骤", max_chars=25)
+            latest_desc = sanitize_for_speech(descs[-1] if descs else "工程步骤", max_chars=40)
             narration = f"正在推进施工：{latest_desc}。"
 
         now = time.time()
-        # 3 秒内完全相同的不重复播报
-        if narration and (narration != self._last_emitted_text or (now - self._last_emitted_time > 3.0)):
+        # 4 秒内完全相同的不重复播报；不同进展可更密一些
+        if narration and (narration != self._last_emitted_text or (now - self._last_emitted_time > 4.0)):
             self._last_emitted_text = narration
             self._last_emitted_time = now
             if self.on_flush:
@@ -594,7 +616,7 @@ class IDEWatcher:
         self.on_action = on_action
         self.on_narration = on_narration
 
-        self.batcher = ActionBatcher(debounce_sec=1.2, on_flush=self._handle_narration_flush)
+        self.batcher = ActionBatcher(debounce_sec=1.6, on_flush=self._handle_narration_flush)
 
         self._last_state_was_working = False
         self._last_user_req: Optional[str] = None
@@ -684,7 +706,10 @@ class IDEWatcher:
                         req_text = content
                         if "<USER_REQUEST>" in content:
                             req_text = content.split("<USER_REQUEST>")[1].split("</USER_REQUEST>")[0].strip()
-                        self._last_user_req = req_text
+                        else:
+                            req_text = content.strip()
+                        if req_text:
+                            self._last_user_req = req_text
                         self._last_state_was_working = True
                         if self.on_user_input and req_text:
                             try:
@@ -794,7 +819,7 @@ class CursorTranscriptWatcher:
         self.on_action = on_action
         self.on_narration = on_narration
 
-        self.batcher = ActionBatcher(debounce_sec=1.2, on_flush=self._handle_narration_flush)
+        self.batcher = ActionBatcher(debounce_sec=1.6, on_flush=self._handle_narration_flush)
         self._file_offset = 0
         self._active_path: Optional[str] = None
         self._last_user_req: Optional[str] = None
@@ -850,7 +875,7 @@ class CursorTranscriptWatcher:
                 "last_user_request": self._last_user_req,
                 "is_working": False,
                 "last_action": self._last_action,
-                "last_completion_summary": sanitize_for_speech(summary, max_chars=180) if status == "success" else None,
+                "last_completion_summary": sanitize_for_speech(summary, max_chars=420) if status == "success" else None,
                 "has_implementation_plan": False,
                 "plan_path": None,
             }

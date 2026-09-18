@@ -46,6 +46,8 @@ from google import genai
 from google.genai import types
 from antigravity_runner import AntigravityRunner
 from ide_watcher import get_ide_chat_snapshot, IDEWatcher, CursorTranscriptWatcher, sanitize_for_speech
+from audio_monitor import AudioPlaybackDetector, InterProcessSpeechLease
+from speech_coordinator import SpeechCoordinator, SpeechItem, SpeechCategory
 
 # 音频参数
 INPUT_SAMPLE_RATE = 16000
@@ -772,6 +774,24 @@ async def run_live_session(
 
                     ptt.print_status()
 
+                    # 单通道语音排队调度器（集中仲裁 Cursor、Antigravity、派单回报与媒体避让）
+                    async def do_send_speech_prompt(item: SpeechItem):
+                        content = types.Content(role="user", parts=[types.Part.from_text(text=item.prompt_text)])
+                        async with ws_send_lock:
+                            await session.send_client_content(turns=content, turn_complete=True)
+
+                    speech_coordinator = SpeechCoordinator(
+                        self_pid=os.getpid(),
+                        workspace=workspace_root,
+                        is_user_speaking_fn=lambda: ptt.is_active,
+                        is_local_ai_speaking_fn=lambda: is_ai_speaking,
+                        is_audio_busy_fn=lambda: (not audio_out_queue.empty()),
+                        send_speech_fn=do_send_speech_prompt,
+                        update_hud_fn=lambda msg: ptt.update_dashboard(advisor_status=msg[:30]),
+                        silence_stabilization_sec=0.5,
+                    )
+                    ptt.on_unmute = speech_coordinator.cancel_transient
+
                     # 任务 A: 麦克风音频流式发送
                     async def send_mic_loop():
                         try:
@@ -881,38 +901,41 @@ async def run_live_session(
                             task_output = f"执行出错: {e}"
                             is_error = True
 
-                        sys.stdout.write(f"\n\033[1;32m[派单任务执行完毕] 正在通过主动语音向长官通报结果...\033[0m\n\n")
+                        sys.stdout.write(f"\n\033[1;32m[派单任务执行完毕] 正在通过排队总线向长官通报结果...\033[0m\n\n")
                         sys.stdout.flush()
 
-                        # 等待长官当前若在说话或 AI 正在发声，稍等片刻避免打断长官（最多等待 3 秒）
-                        wait_count = 0
-                        while (ptt.is_active or is_ai_speaking) and wait_count < 6:
-                            await asyncio.sleep(0.5)
-                            wait_count += 1
-
                         try:
-                            clean_task = sanitize_for_speech(task_desc, max_chars=40)
-                            clean_out = sanitize_for_speech(task_output, max_chars=180)
+                            clean_task = sanitize_for_speech(task_desc, max_chars=60)
+                            clean_out = sanitize_for_speech(task_output, max_chars=360)
                             if is_error:
                                 prompt_text = (
                                     f"[系统警报: 实施工程师执行长官派单任务遇到异常]\n"
                                     f"派单任务: {clean_task}\n"
                                     f"异常输出要点: {clean_out}\n\n"
-                                    f"【发音军规】: 请化身专业明快的女主播（必须以'报告 长官！'开头），用一句纯正自然的中文普通话主动向长官说明遇到什么异常，严禁朗读任何代码符号、括号或文件路径！"
+                                    f"【发音军规】: 必须以'报告 长官！'开头，用 2 到 3 句标准普通话汇报："
+                                    f"说明异常位置、核心原因、建议下一步。严禁朗读代码符号或文件路径！"
                                 )
                             else:
                                 prompt_text = (
                                     f"[系统通知: 实施工程师已完成长官派发任务 ({mode_str})]\n"
                                     f"派单任务: {clean_task}\n"
                                     f"执行结论要点: {clean_out}\n\n"
-                                    f"【发音军规】: 请用甜美干练的女主播语气（必须以'报告 长官！'开头），用一句字正腔圆的标准普通话主动向长官语音汇报已完成派单并说明核心成果，严禁念出任何代码符号或文件路径！"
+                                    f"【发音军规】: 必须以'报告 长官！'开头，用 2 到 3 句标准普通话汇报："
+                                    f"说明派单已完成，概括核心成果与影响面。严禁念出代码符号或文件路径！"
                                 )
 
-                            content = types.Content(role="user", parts=[types.Part.from_text(text=prompt_text)])
-                            async with ws_send_lock:
-                                await session.send_client_content(turns=content, turn_complete=True)
+                            await speech_coordinator.enqueue(
+                                SpeechItem(
+                                    category=SpeechCategory.ERROR if is_error else SpeechCategory.DISPATCH_RESULT,
+                                    source="dispatch",
+                                    task_key=clean_task,
+                                    prompt_text=prompt_text,
+                                    summary=f"派单汇报: {clean_task}",
+                                    ttl=300.0,
+                                )
+                            )
                         except Exception as e:
-                            sys.stdout.write(f"[派单汇报推送异常] {e}\n")
+                            sys.stdout.write(f"[派单汇报推送排队异常] {e}\n")
 
                     # 任务 C: 接收服务端消息（持续多轮监听，绝不单轮退出）
                     async def receive_loop():
@@ -933,6 +956,7 @@ async def run_live_session(
                                                 except asyncio.QueueEmpty:
                                                     break
                                             is_ai_speaking = False
+                                            speech_coordinator.cancel_transient()
                                             if ai_subtitle_streaming:
                                                 sys.stdout.write(" \033[1;33m[语音已打断]\033[0m\n")
                                                 sys.stdout.flush()
@@ -1134,83 +1158,91 @@ async def run_live_session(
                                             # 2. 后台异步协程拉起派单任务，绝不阻塞 receive_loop
                                             asyncio.create_task(run_dispatched_task(task_prompt, authorized=allow_mod, category=category))
 
-                    # 模式 A: IDE 状态与事件实时监听回调
-                    async def on_ide_task_completed(task_name: str, summary: str):
-                        ptt.update_dashboard(ide_action=f"已完成: {task_name[:25]}", advisor_status="通报完成")
-                        sys.stdout.write(f"\n\033[1;32m[IDE 状态感知] 实施工程师已完成任务: {task_name[:50]}\033[0m\n")
+                    # 模式 A: IDE 状态与事件实时监听回调（通过单通道协调器统一排队）
+                    async def on_ide_task_completed(task_name: str, summary: str, source: str = "ide"):
+                        src_title = "Cursor" if source == "cursor" else "Antigravity"
+                        ptt.update_dashboard(ide_action=f"已完成: {task_name[:25]}", advisor_status="通报排队中")
+                        sys.stdout.write(f"\n\033[1;32m[{src_title} 状态感知] 实施工程师已完成任务: {task_name[:50]}\033[0m\n")
                         sys.stdout.flush()
 
-                        # 若当前用户正在说话或 AI 正在播音，稍等片刻避免打断（最多等待 3 秒）
-                        wait_count = 0
-                        while (ptt.is_active or is_ai_speaking) and wait_count < 6:
-                            await asyncio.sleep(0.5)
-                            wait_count += 1
-
-                        try:
-                            clean_task = sanitize_for_speech(task_name, max_chars=35)
-                            clean_summary = sanitize_for_speech(summary, max_chars=180)
-                            prompt_text = (
-                                f"[系统通知: IDE 实施工程师已完成任务]\n"
-                                f"任务: {clean_task}\n"
-                                f"完成要点: {clean_summary}\n\n"
-                                f"【发音军规】: 请化身专业明快的女主播（必须以'报告 长官！'开头），用一句纯正通俗的中文普通话向长官语音汇报已完成该任务并概括核心成果。严禁念出任何代码符号、括号、下划线或文件路径，绝不乱念！"
+                        clean_task = sanitize_for_speech(task_name, max_chars=60)
+                        clean_summary = sanitize_for_speech(summary, max_chars=420)
+                        prompt_text = (
+                            f"[系统通知: {src_title} 实施工程师已完成任务]\n"
+                            f"任务: {clean_task}\n"
+                            f"完成要点: {clean_summary}\n\n"
+                            f"【发音军规】: 必须以'报告 长官！'开头，用标准普通话做 2 到 3 句战报："
+                            f"第1句说明任务已完成；第2句概括 2 到 3 个关键结论或改动；"
+                            f"若有风险或待办，第3句简要提醒。严禁念代码符号、括号、下划线或文件路径。"
+                        )
+                        await speech_coordinator.enqueue(
+                            SpeechItem(
+                                category=SpeechCategory.TASK_COMPLETED,
+                                source=source,
+                                task_key=clean_task,
+                                prompt_text=prompt_text,
+                                summary=f"[{src_title}] 完成: {clean_task}",
+                                ttl=180.0,
                             )
-                            content = types.Content(role="user", parts=[types.Part.from_text(text=prompt_text)])
-                            async with ws_send_lock:
-                                await session.send_client_content(turns=content, turn_complete=True)
-                        except Exception as e:
-                            sys.stdout.write(f"[IDE 状态通知推送异常] {e}\n")
+                        )
 
-                    async def on_ide_error_detected(action: str, error_snippet: str):
-                        ptt.update_dashboard(ide_action=f"异常: {action[:25]}", advisor_status="触发预警")
-                        sys.stdout.write(f"\n\033[1;31m[IDE 异常预警] 实施工程师执行失败: {action}\033[0m\n")
+                    async def on_ide_error_detected(action: str, error_snippet: str, source: str = "ide"):
+                        src_title = "Cursor" if source == "cursor" else "Antigravity"
+                        ptt.update_dashboard(ide_action=f"异常: {action[:25]}", advisor_status="预警排队中")
+                        sys.stdout.write(f"\n\033[1;31m[{src_title} 异常预警] 实施工程师执行失败: {action}\033[0m\n")
                         sys.stdout.write(f"\033[31m  -> 核心原因: {error_snippet}\033[0m\n")
                         sys.stdout.flush()
 
-                        wait_count = 0
-                        while (ptt.is_active or is_ai_speaking) and wait_count < 6:
-                            await asyncio.sleep(0.5)
-                            wait_count += 1
-
-                        try:
-                            clean_act = sanitize_for_speech(action, max_chars=30)
-                            clean_err = sanitize_for_speech(error_snippet, max_chars=100)
-                            alert_text = (
-                                f"[紧急预警: IDE 实施工程师执行出错]\n"
-                                f"操作动作: {clean_act}\n"
-                                f"报错核心原因: {clean_err}\n\n"
-                                f"【发音军规】: 请用清晰利落的女主播语气（必须以'报告 长官！'开头），用一句纯正自然的中文普通话向长官说明哪项任务遇到什么问题。严禁朗读任何代码符号或文件路径！"
+                        clean_act = sanitize_for_speech(action, max_chars=30)
+                        clean_err = sanitize_for_speech(error_snippet, max_chars=100)
+                        alert_text = (
+                            f"[紧急预警: {src_title} 实施工程师执行出错]\n"
+                            f"操作动作: {clean_act}\n"
+                            f"报错核心原因: {clean_err}\n\n"
+                            f"【发音军规】: 请用清晰利落的女主播语气（必须以'报告 长官！'开头），用一句纯正自然的中文普通话向长官说明哪项任务遇到什么问题。严禁朗读任何代码符号或文件路径！"
+                        )
+                        await speech_coordinator.enqueue(
+                            SpeechItem(
+                                category=SpeechCategory.ERROR,
+                                source=source,
+                                task_key=clean_act,
+                                prompt_text=alert_text,
+                                summary=f"[{src_title}] 异常: {clean_act}",
+                                ttl=300.0,
                             )
-                            content = types.Content(role="user", parts=[types.Part.from_text(text=alert_text)])
-                            async with ws_send_lock:
-                                await session.send_client_content(turns=content, turn_complete=True)
-                        except Exception as e:
-                            sys.stdout.write(f"[IDE 异常预警推送异常] {e}\n")
+                        )
 
-                    async def on_ide_action(action: str):
+                    async def on_ide_action(action: str, source: str = "ide"):
                         ptt.update_dashboard(ide_action=action[:40])
 
-                    async def on_ide_narration(narration_text: str):
+                    async def on_ide_narration(narration_text: str, source: str = "ide"):
+                        src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(advisor_status=narration_text[:30])
                         # 长官若开麦对讲，或 AI 正在播音，坚决不插话干扰
                         if ptt.is_active or is_ai_speaking:
                             return
-                        try:
-                            clean_narration = sanitize_for_speech(narration_text, max_chars=40)
-                            prompt_text = (
-                                f"[实施工程师伴随解说]\n"
-                                f"施工进展: {clean_narration}\n\n"
-                                f"请用自然、甜美利落的女主播语气向长官播报当前动作（控制在16字以内，直接说明动作，如'已定位逻辑，正在修改核心回调'），切勿寒暄，严禁念出技术符号。"
+                        clean_narration = sanitize_for_speech(narration_text, max_chars=90)
+                        prompt_text = (
+                            f"[{src_title} 实施工程师伴随解说]\n"
+                            f"施工进展: {clean_narration}\n\n"
+                            f"请用标准普通话向长官播报当前进展（控制在 28 到 40 字）："
+                            f"说明正在做什么、对象是什么；切勿寒暄，严禁念出技术符号与绝对路径。"
+                        )
+                        await speech_coordinator.enqueue(
+                            SpeechItem(
+                                category=SpeechCategory.NARRATION,
+                                source=source,
+                                task_key=f"narration_{source}",
+                                prompt_text=prompt_text,
+                                summary=f"[{src_title}] 施工进展: {clean_narration}",
+                                ttl=25.0,
                             )
-                            c = types.Content(role="user", parts=[types.Part.from_text(text=prompt_text)])
-                            async with ws_send_lock:
-                                await session.send_client_content(turns=c, turn_complete=True)
-                        except Exception:
-                            pass
+                        )
 
-                    async def on_ide_user_input(req: str):
+                    async def on_ide_user_input(req: str, source: str = "ide"):
+                        src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(ide_action=f"新需求: {req[:25]}")
-                        sys.stdout.write(f"\n\033[1;34m[IDE 状态感知] 监测到长官在 IDE 发送了新需求: {req[:60]}...\033[0m\n")
+                        sys.stdout.write(f"\n\033[1;34m[{src_title} 状态感知] 监测到长官发送了新需求: {req[:60]}...\033[0m\n")
                         sys.stdout.flush()
                         try:
                             clean_req = sanitize_for_speech(req, max_chars=80)
@@ -1219,7 +1251,7 @@ async def run_live_session(
                                 parts=[
                                     types.Part.from_text(
                                         text=(
-                                            f"[系统静默记忆: 长官在 IDE 下达了新需求: \"{clean_req}\"，实施工程师已接单分析中。"
+                                            f"[系统静默记忆: 长官在 {src_title} 下达了新需求: \"{clean_req}\"，实施工程师已接单分析中。"
                                             f"此条仅供记忆储备，无需发声。]"
                                         )
                                     )
@@ -1232,27 +1264,28 @@ async def run_live_session(
 
                     ide_watcher = IDEWatcher(
                         poll_interval=0.5,
-                        on_completed=on_ide_task_completed,
-                        on_user_input=on_ide_user_input,
-                        on_error=on_ide_error_detected,
-                        on_action=on_ide_action,
-                        on_narration=on_ide_narration,
+                        on_completed=lambda t, s: on_ide_task_completed(t, s, source="antigravity"),
+                        on_user_input=lambda r: on_ide_user_input(r, source="antigravity"),
+                        on_error=lambda a, e: on_ide_error_detected(a, e, source="antigravity"),
+                        on_action=lambda a: on_ide_action(a, source="antigravity"),
+                        on_narration=lambda n: on_ide_narration(n, source="antigravity"),
                     )
                     cursor_watcher = CursorTranscriptWatcher(
                         workspace_root=workspace_root,
                         poll_interval=0.5,
-                        on_completed=on_ide_task_completed,
-                        on_user_input=on_ide_user_input,
-                        on_error=on_ide_error_detected,
-                        on_action=on_ide_action,
-                        on_narration=on_ide_narration,
+                        on_completed=lambda t, s: on_ide_task_completed(t, s, source="cursor"),
+                        on_user_input=lambda r: on_ide_user_input(r, source="cursor"),
+                        on_error=lambda a, e: on_ide_error_detected(a, e, source="cursor"),
+                        on_action=lambda a: on_ide_action(a, source="cursor"),
+                        on_narration=lambda n: on_ide_narration(n, source="cursor"),
                     )
 
-                    # 并发执行输入、接收与 IDE/Cursor 双源监听（仅发生异常时退出重连）
+                    # 并发执行输入、接收、语音排队协调与 IDE/Cursor 双源监听（仅发生异常时退出重连）
                     done, pending = await asyncio.wait(
                         [
                             asyncio.create_task(send_mic_loop()),
                             asyncio.create_task(receive_loop()),
+                            asyncio.create_task(speech_coordinator.worker_loop(shutdown_event)),
                             asyncio.create_task(ide_watcher.start(shutdown_event)),
                             asyncio.create_task(cursor_watcher.start(shutdown_event)),
                         ],
