@@ -135,7 +135,17 @@ tell application "System Events"
                 keystroke "\`" using {control down}
             end if
             delay 0.8
-            keystroke "cd \"$DIR\" && ${START_CMD}"
+            -- 先执行 Ctrl+C 与 Ctrl+U 清理终端当前行，杜绝残留字符
+            keystroke "c" using {control down}
+            delay 0.1
+            keystroke "u" using {control down}
+            delay 0.1
+        end tell
+        -- 核心防御：通过系统剪贴板 Cmd+V 注入命令，彻底杜绝中文输入法 (Pinyin IME) 将英文字母转译为中文字符 (如 cd -> 菜单, --ide -> --爹)
+        set the clipboard to "cd \"$DIR\" && ${START_CMD}"
+        tell process "${APP_NAME}"
+            keystroke "v" using {command down}
+            delay 0.2
             key code 36
         end tell
     else
