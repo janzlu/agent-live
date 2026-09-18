@@ -104,10 +104,11 @@ if [ "$DO_STOP" = true ]; then
     sleep 0.3
     kill -9 "$WPID" 2>/dev/null || true
   fi
-  # 杀掉本目录下其它 watchdog 守护循环（不含当前 stop 进程）
-  pgrep -f "$DIR/watchdog.sh" | while read -r p; do
-    [ "$p" = "$$" ] && continue
-    kill "$p" 2>/dev/null || true
+  # 清理其它看门狗（避免管道自杀噪音）
+  for p in $(pgrep -f "$DIR/watchdog.sh" 2>/dev/null || true); do
+    if [ "$p" != "$$" ]; then
+      kill "$p" 2>/dev/null || true
+    fi
   done
   rm -f "$PID_FILE"
   log "[STOP] ✓ Agent Live 已显式关闭，不会自动重启"

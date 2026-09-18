@@ -50,10 +50,10 @@ if [ -z "$TARGET_IDE" ] || [ "$TARGET_IDE" == "auto" ]; then
         TARGET_IDE="antigravity"
     else
         # 探测当前前台或活跃进程特征
-        bundle_id="${__CFBundleIdentifier:-}"
-        if [[ "${bundle_id,,}" == *"cursor"* ]]; then
+        bundle_id=$(echo "${__CFBundleIdentifier:-}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$bundle_id" == *"cursor"* ]]; then
             TARGET_IDE="cursor"
-        elif [[ "${bundle_id,,}" == *"antigravity"* ]]; then
+        elif [[ "$bundle_id" == *"antigravity"* ]]; then
             TARGET_IDE="antigravity"
         elif pgrep -x "Cursor" > /dev/null 2>&1 && ! pgrep -x "Antigravity IDE" > /dev/null 2>&1; then
             TARGET_IDE="cursor"
@@ -77,10 +77,12 @@ if [ "$DO_STOP" = true ] || [ "$DO_RESTART" = true ]; then
     sleep 0.5
 fi
 
+IDE_UPPER=$(echo "$TARGET_IDE" | tr '[:lower:]' '[:upper:]')
+
 # 3. 幂等性检查：判断该 IDE 专属实例是否已在运行
 RUNNING_PID=$(pgrep -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" | head -n 1)
 if [ -n "$RUNNING_PID" ]; then
-    echo "[Ensure] ✓ 目标 IDE [${TARGET_IDE^^}] 专属副驾已在运行 (PID: ${RUNNING_PID})，无需重复拉起。"
+    echo "[Ensure] ✓ 目标 IDE [${IDE_UPPER}] 专属副驾已在运行 (PID: ${RUNNING_PID})，无需重复拉起。"
     exit 0
 fi
 
@@ -95,7 +97,7 @@ fi
 
 # 4. 启动终端实例
 if [ -t 1 ]; then
-    echo "[Ensure] 在当前前台交互式终端直接拉起 [${TARGET_IDE^^}] 专属副驾..."
+    echo "[Ensure] 在当前前台交互式终端直接拉起 [${IDE_UPPER}] 专属副驾..."
     cd "$DIR" && exec ./start.sh --ide "${TARGET_IDE}" ${WORKSPACE:+--workspace "${WORKSPACE}"} "${PASSTHROUGH_ARGS[@]}"
 else
     # 匹配目标宿主 macOS Application 名称
