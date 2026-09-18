@@ -13,6 +13,8 @@ TARGET_IDE=""
 WORKSPACE=""
 DO_RESTART=false
 DO_STOP=false
+RUN_HERE=false
+FORCE_OPEN_TERMINAL=false
 EXPLICIT_IDE=""
 PASSTHROUGH_ARGS=()
 
@@ -26,6 +28,14 @@ while [[ $# -gt 0 ]]; do
         --workspace)
             WORKSPACE="$2"
             shift 2
+            ;;
+        --here|--foreground|-f)
+            RUN_HERE=true
+            shift
+            ;;
+        --open-terminal|--internal|--ui)
+            FORCE_OPEN_TERMINAL=true
+            shift
             ;;
         --restart|-r)
             DO_RESTART=true
@@ -96,7 +106,7 @@ if [ ${#PASSTHROUGH_ARGS[@]} -gt 0 ]; then
 fi
 
 # 4. 启动终端实例
-if [ -t 1 ]; then
+if [ "$RUN_HERE" = true ] && [ -t 1 ]; then
     echo "[Ensure] 在当前前台交互式终端直接拉起 [${IDE_UPPER}] 专属副驾..."
     cd "$DIR" && exec ./start.sh --ide "${TARGET_IDE}" ${WORKSPACE:+--workspace "${WORKSPACE}"} "${PASSTHROUGH_ARGS[@]}"
 else
@@ -114,8 +124,16 @@ tell application "System Events"
     if exists (process "${APP_NAME}") then
         tell application "${APP_NAME}" to activate
         tell process "${APP_NAME}"
-            click menu item "New Terminal" of menu 1 of menu bar item "Terminal" of menu bar 1
-            delay 0.6
+            set frontmost to true
+            delay 0.5
+            if exists (menu bar item "Terminal" of menu bar 1) then
+                click menu item "New Terminal" of menu 1 of menu bar item "Terminal" of menu bar 1
+            else if exists (menu item "Terminal" of menu 1 of menu bar item "View" of menu bar 1) then
+                click menu item "Terminal" of menu 1 of menu bar item "View" of menu bar 1
+            else
+                keystroke "\`" using {control down}
+            end if
+            delay 0.8
             keystroke "cd \"$DIR\" && ${START_CMD}"
             key code 36
         end tell
@@ -125,5 +143,5 @@ tell application "System Events"
     end if
 end tell
 EOF
-    echo "[Ensure] ✓ 已向 ${APP_NAME} 下发终端启动指令。"
+    echo "[Ensure] ✓ 已向 ${APP_NAME} 下发内置终端启动指令。"
 fi
