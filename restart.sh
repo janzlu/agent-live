@@ -28,13 +28,14 @@ echo "=================================================================="
 
 # 1. 彻底杀掉所有残留旧进程与自愈脚本
 echo "[1/3] 正在安全终止旧会话进程..."
+pkill -9 -f "watchdog.sh" 2>/dev/null || true
 pkill -9 -f "start.sh" 2>/dev/null || true
 pkill -9 -f "python.*live_sidecar.py" 2>/dev/null || true
 sleep 1
 
 # 2. 清理音频仲裁锁与残留状态
-echo "[2/3] 正在释放跨进程音频锁与 STOP 旗标..."
-rm -f ~/.agent_live_audio.lock "$DIR/.run/STOP"* 2>/dev/null || true
+echo "[2/3] 正在释放跨进程音频锁与残留状态文件..."
+rm -f ~/.agent_live_audio.lock "$DIR/.run/"*.pid "$DIR/.run/STOP"* 2>/dev/null || true
 
 # 3. 按目标重新拉起
 echo "[3/3] 正在准备重新拉起..."
