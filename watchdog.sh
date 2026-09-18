@@ -13,11 +13,7 @@ cd "$DIR"
 
 RUN_DIR="$DIR/.run"
 mkdir -p "$RUN_DIR"
-STOP_FLAG="$RUN_DIR/STOP"
-PID_FILE="$RUN_DIR/watchdog.pid"
-ARGS_FILE="$RUN_DIR/watchdog.args"
-LOG_FILE="$RUN_DIR/watchdog.log"
-SIDECAR_LOG="$RUN_DIR/sidecar.out"
+GLOBAL_STOP_FLAG="$RUN_DIR/STOP"
 
 IDE="cursor"
 WORKSPACE=""
@@ -38,6 +34,12 @@ while [[ $# -gt 0 ]]; do
     *) PASSTHROUGH+=("$1"); shift ;;
   esac
 done
+
+STOP_FLAG="$RUN_DIR/STOP_${IDE}"
+PID_FILE="$RUN_DIR/watchdog_${IDE}.pid"
+ARGS_FILE="$RUN_DIR/watchdog_${IDE}.args"
+LOG_FILE="$RUN_DIR/watchdog_${IDE}.log"
+SIDECAR_LOG="$RUN_DIR/sidecar_${IDE}.out"
 
 log() {
   local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -95,8 +97,11 @@ if [ "$DO_STATUS" = true ]; then
 fi
 
 if [ "$DO_STOP" = true ]; then
-  log "[STOP] 收到显式关闭指令，写入 STOP 旗标并终止会话"
+  log "[STOP] 收到显式关闭指令 (${IDE})，写入 STOP 旗标并终止会话"
   touch "$STOP_FLAG"
+  if [ "$IDE" == "all" ]; then
+    touch "$GLOBAL_STOP_FLAG"
+  fi
   kill_stack
   if watchdog_alive; then
     WPID=$(cat "$PID_FILE")
@@ -104,15 +109,15 @@ if [ "$DO_STOP" = true ]; then
     sleep 0.3
     kill -9 "$WPID" 2>/dev/null || true
   fi
-  # 清理其它看门狗（避免管道自杀噪音）
-  for p in $(pgrep -f "$DIR/watchdog.sh" 2>/dev/null || true); do
+  # 清理该 IDE 的看门狗
+  for p in $(pgrep -f "$DIR/watchdog.sh.*--ide ${IDE}" 2>/dev/null || true); do
     if [ "$p" != "$$" ]; then
       kill "$p" 2>/dev/null || true
     fi
   done
   rm -f "$PID_FILE"
-  log "[STOP] ✓ Agent Live 已显式关闭，不会自动重启"
-  echo "✓ 已显式关闭 Agent Live（需再次 ./watchdog.sh 才会启动）"
+  log "[STOP] ✓ Agent Live [${IDE}] 已显式关闭，不会自动重启"
+  echo "✓ 已显式关闭 Agent Live [${IDE}]（需再次 ./watchdog.sh --ide ${IDE} 才会启动）"
   exit 0
 fi
 
@@ -142,9 +147,9 @@ if [ "${AGENT_LIVE_WATCHDOG_INNER:-}" != "1" ]; then
   echo "$INNER_PID" > "$PID_FILE"
   disown "$INNER_PID" 2>/dev/null || true
   sleep 1
-  echo "✓ 看门狗已后台启动 (PID $INNER_PID)"
+  echo "✓ 看门狗已后台启动 [${IDE}] (PID $INNER_PID)"
   echo "  日志: $LOG_FILE"
-  echo "  显式关闭: $DIR/watchdog.sh --stop  或  $DIR/stop.sh"
+  echo "  显式关闭: $DIR/watchdog.sh --ide ${IDE} --stop  或  $DIR/stop.sh"
   exit 0
 fi
 
@@ -154,20 +159,26 @@ rm -f "$STOP_FLAG"
 
 # macOS：忽略 SIGHUP，避免终端关闭带走守护
 trap '' SIGHUP
-trap 'if [ -f "$STOP_FLAG" ]; then rm -f "$PID_FILE"; exit 0; fi' SIGTERM SIGINT
+trap 'if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then rm -f "$PID_FILE"; exit 0; fi' SIGTERM SIGINT
 
 log "[BOOT] 看门狗启动 IDE=$IDE WORKSPACE=${WORKSPACE:-.} VOICE=$VOICE pid=$$"
 
 launch_sidecar() {
   cd "$DIR" || return 1
-  # macOS 无 setsid：用 nohup + 后台脱离
+  # 若 start.sh 已在为该 IDE 运行中，优先等待其内层循环自愈，杜绝双进程竞争
+  if pgrep -f "start.sh.*--ide ${IDE}" >/dev/null 2>&1; then
+    sleep 2.5
+    if is_sidecar_alive; then
+      return 0
+    fi
+  fi
   nohup ./start.sh "${START_ARGS[@]}" >>"$SIDECAR_LOG" 2>&1 &
   disown $! 2>/dev/null || true
 }
 
 while true; do
-  if [ -f "$STOP_FLAG" ]; then
-    log "[STOP] 检测到 STOP 旗标，看门狗退出"
+  if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
+    log "[STOP] 检测到 STOP 旗标 (${IDE})，看门狗退出"
     rm -f "$PID_FILE"
     exit 0
   fi

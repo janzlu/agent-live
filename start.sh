@@ -42,21 +42,42 @@ echo "------------------------------------------------------------------"
 
 RUN_DIR="$DIR/.run"
 mkdir -p "$RUN_DIR"
-STOP_FLAG="$RUN_DIR/STOP"
 
-# 显式启动时清理历史残留 STOP 旗标，确保全新启动
-rm -f "$STOP_FLAG" "$RUN_DIR/STOP_"* 2>/dev/null || true
+# 智能推断与提取专属 IDE 通道
+CURRENT_IDE=""
+for ((i=1; i<=$#; i++)); do
+    if [ "${!i}" == "--ide" ]; then
+        j=$((i+1))
+        CURRENT_IDE="${!j}"
+        break
+    fi
+done
+if [ -z "$CURRENT_IDE" ]; then
+    if [ -n "$CURSOR_AGENT" ] || [ -n "$CURSOR_REQUEST_ID" ] || [ -n "$AGENT_TRANSCRIPTS" ] || [ -n "$CURSOR_WORKSPACE_LABEL" ]; then
+        CURRENT_IDE="cursor"
+    elif [ -n "$ANTIGRAVITY_TRAJECTORY_ID" ] || [ -n "$ANTIGRAVITY_CLI_ALIAS" ]; then
+        CURRENT_IDE="antigravity"
+    else
+        CURRENT_IDE="cursor"
+    fi
+fi
+
+STOP_FLAG="$RUN_DIR/STOP_${CURRENT_IDE}"
+GLOBAL_STOP_FLAG="$RUN_DIR/STOP"
+
+# 显式启动时仅清理当前 IDE 的历史残留 STOP 旗标，确保全新启动且绝不影响另一 IDE
+rm -f "$STOP_FLAG" 2>/dev/null || true
 
 # 显式关闭处理：终端前台 Ctrl+C 直接写入 STOP 旗标并退出；外部信号仅在有 STOP 旗标时正常退出
 _on_sigint() {
-    echo -e "\n[Sidecar] 收到长官终端中断指令 (Ctrl+C)，已记录 STOP 旗标并安全退出。"
+    echo -e "\n[Sidecar] 收到长官终端中断指令 (Ctrl+C)，已记录 STOP_${CURRENT_IDE} 旗标并安全退出。"
     touch "$STOP_FLAG" 2>/dev/null || true
     exit 0
 }
 trap _on_sigint SIGINT
 
 _on_sigterm() {
-    if [ -f "$STOP_FLAG" ]; then
+    if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
         echo -e "\n[Sidecar] 收到显式关闭指令 (SIGTERM)，会话安全退出。"
         exit 0
     fi
@@ -68,17 +89,13 @@ trap _on_sigterm SIGTERM
 # 智能补全宿主通道参数（若命令行未显式传入 --ide）
 EXTRA_ARGS=()
 if [[ "$*" != *"--ide"* ]]; then
-    if [ -n "$CURSOR_AGENT" ] || [ -n "$CURSOR_REQUEST_ID" ] || [ -n "$AGENT_TRANSCRIPTS" ] || [ -n "$CURSOR_WORKSPACE_LABEL" ]; then
-        EXTRA_ARGS+=("--ide" "cursor")
-    elif [ -n "$ANTIGRAVITY_TRAJECTORY_ID" ] || [ -n "$ANTIGRAVITY_CLI_ALIAS" ]; then
-        EXTRA_ARGS+=("--ide" "antigravity")
-    fi
+    EXTRA_ARGS+=("--ide" "$CURRENT_IDE")
 fi
 
 set +e
 while true; do
-    if [ -f "$STOP_FLAG" ]; then
-        echo "[Sidecar] 检测到 STOP 旗标，停止自愈循环。"
+    if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
+        echo "[Sidecar] 检测到 STOP 旗标 (${CURRENT_IDE})，停止自愈循环。"
         break
     fi
     if [ -f ".env" ]; then
@@ -86,13 +103,13 @@ while true; do
     fi
     python live_sidecar.py "${EXTRA_ARGS[@]}" "$@"
     EXIT_CODE=$?
-    if [ -f "$STOP_FLAG" ]; then
+    if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
         echo ""
-        echo "[Sidecar] 显式关闭完成，不再自动重启。"
+        echo "[Sidecar] 显式关闭完成 (${CURRENT_IDE})，不再自动重启。"
         break
     fi
     # 0 / 130(Ctrl+C) / 143(SIGTERM) 仅在有 STOP 旗标时视为主动退出；否则继续自愈
-    if [ $EXIT_CODE -eq 0 ] && [ -f "$STOP_FLAG" ]; then
+    if [ $EXIT_CODE -eq 0 ] && ([ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]); then
         echo ""
         echo "[Sidecar] 长官主动中止，会话已安全关闭。"
         break

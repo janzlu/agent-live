@@ -84,8 +84,7 @@ if [ "$DO_STOP" = true ] || [ "$DO_RESTART" = true ]; then
     # 重启：先 stop 再清旗标由后续启动逻辑拉起
     "$DIR/watchdog.sh" --ide "$TARGET_IDE" --stop >/dev/null 2>&1 || true
     pkill -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" 2>/dev/null || true
-    pkill -f "start.sh.*--ide ${TARGET_IDE}" 2>/dev/null || true
-    rm -f "$DIR/.run/STOP"
+    rm -f "$DIR/.run/STOP_${TARGET_IDE}" "$DIR/.run/STOP"
     sleep 0.8
 fi
 
