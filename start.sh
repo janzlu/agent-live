@@ -22,6 +22,13 @@ else
     source .venv/bin/activate
 fi
 
+for arg in "$@"; do
+    if [ "$arg" == "--help" ] || [ "$arg" == "-h" ]; then
+        exec python live_sidecar.py --help
+    fi
+done
+
+
 # 2. 检查 .env 配置文件
 if [ -f ".env" ]; then
     export $(grep -v '^#' .env | xargs)
@@ -92,6 +99,21 @@ if [[ "$*" != *"--ide"* ]]; then
     EXTRA_ARGS+=("--ide" "$CURRENT_IDE")
 fi
 
+# 智能前台接管与单例防护：避免同通道进程并发
+EXISTING_PIDS=$(pgrep -f "python.*live_sidecar.py.*--ide ${CURRENT_IDE}" 2>/dev/null || true)
+if [ -n "$EXISTING_PIDS" ]; then
+    if [ -t 1 ]; then
+        echo "[前台接管] 检测到专属通道 [${CURRENT_IDE}] 已有实例运行 (PID: $EXISTING_PIDS)，正在平滑终止并由当前终端接管..."
+        for p in $EXISTING_PIDS; do
+            kill "$p" 2>/dev/null || true
+        done
+        sleep 0.8
+    else
+        echo "[单例互斥] 专属通道 [${CURRENT_IDE}] 已有实例 (PID: $EXISTING_PIDS) 正常运行，无需重复拉起。"
+        exit 0
+    fi
+fi
+
 set +e
 while true; do
     if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
@@ -103,6 +125,10 @@ while true; do
     fi
     python live_sidecar.py "${EXTRA_ARGS[@]}" "$@"
     EXIT_CODE=$?
+    if [ $EXIT_CODE -eq 42 ]; then
+        echo "[Sidecar] 检测到专属通道已有活跃实例，退出当前自愈循环以杜绝串音。"
+        break
+    fi
     if [ -f "$STOP_FLAG" ] || [ -f "$GLOBAL_STOP_FLAG" ]; then
         echo ""
         echo "[Sidecar] 显式关闭完成 (${CURRENT_IDE})，不再自动重启。"
@@ -120,3 +146,4 @@ while true; do
         sleep 2
     fi
 done
+

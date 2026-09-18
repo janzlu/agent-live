@@ -52,6 +52,14 @@ log() {
 }
 
 is_sidecar_alive() {
+  local lock_file="$HOME/.agent_live_${IDE}.instance.lock"
+  if [ -f "$lock_file" ]; then
+    local lpid
+    lpid=$(python3 -c "import json, os; d=json.load(open('$lock_file')); os.kill(d['pid'], 0); print(d['pid'])" 2>/dev/null || true)
+    if [ -n "$lpid" ]; then
+      return 0
+    fi
+  fi
   if [ -n "$IDE" ] && [ "$IDE" != "auto" ] && [ "$IDE" != "all" ]; then
     pgrep -f "python.*live_sidecar.py.*--ide ${IDE}" >/dev/null 2>&1
   else
@@ -67,8 +75,9 @@ kill_stack() {
     pkill -f "python.*live_sidecar.py" 2>/dev/null || true
     pkill -f "$DIR/start.sh" 2>/dev/null || true
   fi
-  rm -f "$HOME/.agent_live_audio.lock" 2>/dev/null || true
+  rm -f "$HOME/.agent_live_${IDE}.instance.lock" "$HOME/.agent_live_audio.lock" 2>/dev/null || true
 }
+
 
 watchdog_alive() {
   [ -f "$PID_FILE" ] || return 1

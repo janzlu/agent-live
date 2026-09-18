@@ -90,12 +90,24 @@ fi
 
 IDE_UPPER=$(echo "$TARGET_IDE" | tr '[:lower:]' '[:upper:]')
 
-# 3. 幂等性检查：判断该 IDE 专属实例是否已在运行
-RUNNING_PID=$(pgrep -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" | head -n 1)
+# 3. 幂等性检查：判断该 IDE 专属实例是否已在运行 (综合检查锁文件与进程特征)
+LOCK_FILE="$HOME/.agent_live_${TARGET_IDE}.instance.lock"
+RUNNING_PID=""
+if [ -f "$LOCK_FILE" ]; then
+    LPID=$(python3 -c "import json, os; d=json.load(open('$LOCK_FILE')); os.kill(d['pid'], 0); print(d['pid'])" 2>/dev/null || true)
+    if [ -n "$LPID" ]; then
+        RUNNING_PID="$LPID"
+    fi
+fi
+if [ -z "$RUNNING_PID" ]; then
+    RUNNING_PID=$(pgrep -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" | head -n 1)
+fi
+
 if [ -n "$RUNNING_PID" ]; then
     echo "[Ensure] ✓ 目标 IDE [${IDE_UPPER}] 专属副驾已在运行 (PID: ${RUNNING_PID})，无需重复拉起。"
     exit 0
 fi
+
 
 # 组装启动参数
 START_CMD="./start.sh --ide ${TARGET_IDE}"

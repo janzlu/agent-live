@@ -17,8 +17,12 @@ import re
 import unicodedata
 import asyncio
 import argparse
+import time
+import json
+import fcntl
+import signal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 import sounddevice as sd
 from dotenv import load_dotenv
@@ -67,6 +71,156 @@ def set_explicit_stop_flag(ide: str):
             Path(p).touch()
         except Exception:
             pass
+
+
+class ChannelInstanceManager:
+    """
+    基于内核文件锁 (fcntl.flock) 的 IDE 专属通道单例管理器。
+    - 绝无虚假残留：无论正常退出、异常崩溃或 kill -9，macOS 内核均会自动释放锁；
+    - 智能前台接管：若当前是交互终端 (sys.stdin.isatty()) 且旧实例为后台无 TTY 实例，发送 SIGTERM 平滑接管；
+    - 拦截同通道终端并发：若已有前台终端实例运行，阻止当前进程重复拉起，彻底杜绝双麦克风推流与双扬声器串音。
+    """
+    def __init__(self, ide: str, workspace: str):
+        self.ide = (ide or "antigravity").lower()
+        self.workspace = workspace
+        self.lock_file_path = Path.home() / f".agent_live_{self.ide}.instance.lock"
+        self._lock_file = None
+        self._is_owner = False
+
+    @property
+    def is_owner(self) -> bool:
+        return self._is_owner
+
+    def acquire_or_takeover(self) -> Tuple[bool, int]:
+        """
+        尝试获取独占锁。
+        返回 (True, 0) 表示成功持有单例锁；
+        返回 (False, exit_code) 表示已有活跃实例且放弃运行（exit_code=42 告知 start.sh 停止循环）。
+        """
+        try:
+            self.lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+            self._lock_file = open(self.lock_file_path, "a+")
+        except Exception as e:
+            logger.warning(f"Failed to open instance lock file {self.lock_file_path}: {e}")
+            return True, 0
+
+        # 1. 尝试非阻塞获取排他锁
+        try:
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._is_owner = True
+            self._write_meta()
+            return True, 0
+        except (BlockingIOError, IOError):
+            pass
+
+        # 2. 锁已被其他进程持有，读取已有进程信息
+        existing_meta = self._read_meta()
+        existing_pid = existing_meta.get("pid")
+        is_existing_tty = existing_meta.get("is_tty", False)
+        current_is_tty = sys.stdin.isatty()
+
+        if existing_pid and existing_pid != os.getpid():
+            alive = True
+            try:
+                os.kill(existing_pid, 0)
+            except OSError:
+                alive = False
+
+            if not alive:
+                # 对方进程已死亡，重试获取
+                try:
+                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._is_owner = True
+                    self._write_meta()
+                    return True, 0
+                except Exception:
+                    pass
+
+            # 场景 A: 当前为前台交互终端，而旧实例是无 TTY 的后台守护进程 -> 平滑接管
+            if current_is_tty and not is_existing_tty:
+                sys.stdout.write(f"\n[单例接管] 检测到专属通道 [{self.ide.upper()}] 已有后台常驻实例 (PID {existing_pid})，正在接管并迁移至当前交互终端...\n")
+                sys.stdout.flush()
+                try:
+                    os.kill(existing_pid, signal.SIGTERM)
+                except Exception:
+                    pass
+
+                start_wait = time.time()
+                while time.time() - start_wait < 1.5:
+                    time.sleep(0.15)
+                    try:
+                        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        self._is_owner = True
+                        self._write_meta()
+                        sys.stdout.write(f"[单例接管] ✓ 已成功接管专属通道 [{self.ide.upper()}] (旧 PID {existing_pid} 已安全退出)\n")
+                        sys.stdout.flush()
+                        return True, 0
+                    except (BlockingIOError, IOError):
+                        continue
+
+                # 若超时旧进程仍未释放，强杀后接管
+                try:
+                    os.kill(existing_pid, signal.SIGKILL)
+                    time.sleep(0.2)
+                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._is_owner = True
+                    self._write_meta()
+                    return True, 0
+                except Exception:
+                    pass
+
+            # 场景 B: 阻止重复拉起 (两个终端并发运行，或者当前自身是无 TTY 后台进程且已有实例)
+            sys.stdout.write(
+                f"\n⚠️ [单例互斥拦截] 专属通道 [{self.ide.upper()}] 已在活跃实例 (PID {existing_pid}) 中正常运行！\n"
+                f"   为彻底杜绝双重串音、麦克风抢麦与双语音重叠，已阻止当前进程重复拉起。\n"
+                f"   如需强制重启该通道，请执行: ./restart.sh --ide {self.ide}\n\n"
+            )
+            sys.stdout.flush()
+            logger.warning(f"Aborted launch: Instance for channel '{self.ide}' already running with PID {existing_pid}")
+            return False, 42
+
+        return False, 42
+
+    def _write_meta(self):
+        try:
+            self._lock_file.seek(0)
+            self._lock_file.truncate()
+            payload = {
+                "pid": os.getpid(),
+                "ide": self.ide,
+                "workspace": self.workspace,
+                "is_tty": sys.stdin.isatty(),
+                "started_at": time.time(),
+            }
+            self._lock_file.write(json.dumps(payload))
+            self._lock_file.flush()
+        except Exception:
+            pass
+
+    def _read_meta(self) -> dict:
+        try:
+            if self._lock_file and not self._lock_file.closed:
+                self._lock_file.seek(0)
+                content = self._lock_file.read().strip()
+                if content:
+                    return json.loads(content)
+            elif self.lock_file_path.exists():
+                content = self.lock_file_path.read_text(encoding="utf-8").strip()
+                if content:
+                    return json.loads(content)
+        except Exception:
+            pass
+        return {}
+
+
+    def release(self):
+        if self._lock_file and self._is_owner:
+            try:
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._is_owner = False
 
 
 def detect_current_ide() -> str:
@@ -252,7 +406,12 @@ class NoiseGate:
             return False
 
 
-def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop, target_ide: Optional[str] = None):
+def setup_global_hotkey(
+    ptt,
+    loop: asyncio.AbstractEventLoop,
+    target_ide: Optional[str] = None,
+    instance_mgr: Optional[ChannelInstanceManager] = None,
+):
     """
     配置系统级全局呼叫热键 (支持跨软件/后台随时对讲呼叫)
     默认绑定: <ctrl>+<space> 以及备选 <cmd>+<shift>+<space>
@@ -262,6 +421,9 @@ def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop, target_ide: Option
         from pynput import keyboard
 
         def on_hotkey_triggered():
+            # 单例门禁加固：若当前进程未持有本通道单例锁，绝对禁止响应热键！
+            if instance_mgr and not instance_mgr.is_owner:
+                return
             if target_ide in ("cursor", "antigravity"):
                 try:
                     from AppKit import NSWorkspace
@@ -579,6 +741,7 @@ async def run_live_session(
     vad_silence_ms: int = 1500,
     manual_confirm: bool = True,
     ide_target: str = "auto",
+    instance_mgr: Optional[ChannelInstanceManager] = None,
 ):
     resolved_ide = detect_current_ide() if ide_target == "auto" else ide_target
     api_key = os.getenv("GEMINI_API_KEY")
@@ -713,7 +876,7 @@ async def run_live_session(
 
     # 启动系统级全局呼叫热键 (支持跨软件/后台随时对讲，智能过滤非目标 IDE)
     resolved_ide = ide_target if ide_target and ide_target != "auto" else detect_current_ide()
-    global_hotkey = setup_global_hotkey(ptt, asyncio.get_running_loop(), target_ide=resolved_ide)
+    global_hotkey = setup_global_hotkey(ptt, asyncio.get_running_loop(), target_ide=resolved_ide, instance_mgr=instance_mgr)
 
     # 动态更新终端 Tab 标题栏，一眼区分不同 IDE 专属终端会话
     try:
@@ -831,43 +994,53 @@ async def run_live_session(
     )
     speaker_stream.start()
 
-    # 启动后台常驻扬声器播放循环 (集成 Jitter Buffer，杜绝网络抖动和人造休眠卡顿)
+    # 启动后台常驻扬声器播放循环 (集成 Jitter Buffer 与跨进程租约互斥，杜绝网络抖动与多实例串音)
     async def play_audio_loop():
         nonlocal is_ai_speaking, speaker_cooldown_until
         silence_start = None
         import time
-        while not shutdown_event.is_set():
-            try:
-                pcm_chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.12)
-            except asyncio.TimeoutError:
-                if is_ai_speaking and audio_out_queue.empty():
-                    now = asyncio.get_running_loop().time()
-                    if silence_start is None:
-                        silence_start = now
-                    elif now - silence_start >= 0.35:
-                        # 超过 350ms 没有任何新音频包且队列为空，说明本轮语音输出彻底结束
-                        is_ai_speaking = False
-                        silence_start = None
-                        speaker_cooldown_until = time.time() + 0.25  # 250ms 消回声安全冷却期
-                continue
+        speech_lease = InterProcessSpeechLease()
+        self_pid = os.getpid()
 
-            silence_start = None
-            is_ai_speaking = True
-
-            # 聚合并行到达的音频块，保持扬声器硬件流水线充盈顺畅，彻底消除断续卡顿
-            chunks = [pcm_chunk]
-            while not audio_out_queue.empty() and len(chunks) < 6:
+        try:
+            while not shutdown_event.is_set():
                 try:
-                    chunks.append(audio_out_queue.get_nowait())
-                except asyncio.QueueEmpty:
-                    break
+                    pcm_chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.12)
+                except asyncio.TimeoutError:
+                    if is_ai_speaking and audio_out_queue.empty():
+                        now = asyncio.get_running_loop().time()
+                        if silence_start is None:
+                            silence_start = now
+                        elif now - silence_start >= 0.35:
+                            # 超过 350ms 没有任何新音频包且队列为空，说明本轮语音输出彻底结束
+                            is_ai_speaking = False
+                            silence_start = None
+                            speaker_cooldown_until = time.time() + 0.25  # 250ms 消回声安全冷却期
+                            speech_lease.release(self_pid)
+                    continue
 
-            if len(chunks) == 1:
-                batch = chunks[0]
-            else:
-                batch = np.concatenate(chunks)
+                silence_start = None
+                is_ai_speaking = True
 
-            await asyncio.to_thread(speaker_stream.write, batch)
+                # 聚合并行到达的音频块，保持扬声器硬件流水线充盈顺畅，彻底消除断续卡顿
+                chunks = [pcm_chunk]
+                while not audio_out_queue.empty() and len(chunks) < 6:
+                    try:
+                        chunks.append(audio_out_queue.get_nowait())
+                    except asyncio.QueueEmpty:
+                        break
+
+                if len(chunks) == 1:
+                    batch = chunks[0]
+                else:
+                    batch = np.concatenate(chunks)
+
+                # 跨进程物理声卡播音租约加固：确保持有本进程发声锁，杜绝跨宿主踩麦混音
+                speech_lease.acquire(self_pid=self_pid, source=resolved_ide, ttl_sec=3.0)
+
+                await asyncio.to_thread(speaker_stream.write, batch)
+        finally:
+            speech_lease.release(self_pid)
 
     speaker_task = asyncio.create_task(play_audio_loop())
     keyboard_task = asyncio.create_task(keyboard_listener(ptt, shutdown_event, resolved_ide=resolved_ide))
@@ -1567,6 +1740,12 @@ def main():
 
     manual_confirm = not args.auto_reply
 
+    # 单例互斥与前台接管：确保同通道绝不同时存活两个实例
+    instance_mgr = ChannelInstanceManager(target_ide, str(target_path))
+    acquired, exit_code = instance_mgr.acquire_or_takeover()
+    if not acquired:
+        sys.exit(exit_code)
+
     try:
         asyncio.run(run_live_session(
             str(target_path),
@@ -1576,9 +1755,12 @@ def main():
             vad_silence_ms=args.vad_silence_ms,
             manual_confirm=manual_confirm,
             ide_target=args.ide,
+            instance_mgr=instance_mgr,
         ))
     except (KeyboardInterrupt, SystemExit):
         sys.exit(0)
+    finally:
+        instance_mgr.release()
 
 
 if __name__ == "__main__":

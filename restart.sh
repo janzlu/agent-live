@@ -31,11 +31,13 @@ echo "[1/3] 正在安全终止旧会话进程..."
 pkill -9 -f "watchdog.sh" 2>/dev/null || true
 pkill -9 -f "start.sh" 2>/dev/null || true
 pkill -9 -f "python.*live_sidecar.py" 2>/dev/null || true
+pkill -9 -f "live-sidecar/start.sh" 2>/dev/null || true
 sleep 1
 
 # 2. 清理音频仲裁锁与残留状态
-echo "[2/3] 正在释放跨进程音频锁与残留状态文件..."
-rm -f ~/.agent_live_audio.lock "$DIR/.run/"*.pid "$DIR/.run/STOP"* 2>/dev/null || true
+echo "[2/3] 正在释放跨进程音频锁、通道单例锁与残留状态文件..."
+rm -f ~/.agent_live_audio.lock ~/.agent_live_*.instance.lock ~/.agent_live_*.lock "$DIR/.run/"*.pid "$DIR/.run/STOP"* 2>/dev/null || true
+
 
 # 3. 按目标重新拉起
 echo "[3/3] 正在准备重新拉起..."

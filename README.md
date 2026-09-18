@@ -87,7 +87,7 @@ HTTPS_PROXY=http://127.0.0.1:7897
 # ./start.sh --ide cursor
 # ./start.sh --ide antigravity
 ```
-> **IDE 隔离与专属绑定**：系统会自动嗅探当前终端属于 **Cursor** 还是 **Antigravity IDE**，自动锁定当前 IDE 正在编辑的专属工程与对话转录，彻底杜绝跨 IDE 串音与重复感知。若长官在不同 IDE 中分别启动独立的 sidecar 终端实例，底层跨进程租约锁（`InterProcessSpeechLease`）会自动排队互斥，绝不抢麦踩音。
+> **IDE 隔离与专属通道单例保护**：系统会自动嗅探当前终端属于 **Cursor** 还是 **Antigravity IDE**，自动锁定当前 IDE 正在编辑的专属工程与对话转录。系统内置基于 macOS 内核文件锁（`ChannelInstanceManager`）的通道单例防护，前台交互终端启动时自动平滑接管旧后台实例，严禁同通道多实例并发；底层跨进程音频租约锁（`InterProcessSpeechLease`）在主动汇报与物理声卡播音层实现全面互斥排队，彻底杜绝麦克风抢麦、双会话推流与双扬声器重叠发声。
 
 ---
 
