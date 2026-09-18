@@ -330,21 +330,30 @@ def _snapshot_from_cursor_transcript(meta: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_ide_chat_snapshot(use_cache: bool = True, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+def get_ide_chat_snapshot(
+    use_cache: bool = True,
+    workspace_root: Optional[str] = None,
+    ide_target: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     解析当前 IDE 对话状态的即时快照。
     优先从全局高速缓存获取（0ms）；若无缓存则全量解析。
-    数据源优先级：更新更晚的一方（Antigravity vs Cursor）。
+    若指定 ide_target ('cursor' | 'antigravity')，则严格隔离只解析专属 IDE；若未指定则选择更新更晚的一方。
     """
     global GLOBAL_CACHED_SNAPSHOT
     if use_cache and GLOBAL_CACHED_SNAPSHOT and GLOBAL_CACHED_SNAPSHOT.get("status") == "OK":
-        return GLOBAL_CACHED_SNAPSHOT
+        if not ide_target or GLOBAL_CACHED_SNAPSHOT.get("source") == ide_target:
+            return GLOBAL_CACHED_SNAPSHOT
 
-    ag_meta = get_active_ide_transcript()
-    cu_meta = get_active_cursor_transcript(workspace_root)
+    ag_meta = get_active_ide_transcript() if ide_target != "cursor" else None
+    cu_meta = get_active_cursor_transcript(workspace_root) if ide_target != "antigravity" else None
 
     chosen = None
-    if ag_meta and cu_meta:
+    if ide_target == "cursor":
+        chosen = cu_meta
+    elif ide_target == "antigravity":
+        chosen = ag_meta
+    elif ag_meta and cu_meta:
         chosen = ag_meta if ag_meta["last_modified"] >= cu_meta["last_modified"] else cu_meta
     else:
         chosen = ag_meta or cu_meta

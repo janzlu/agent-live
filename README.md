@@ -83,8 +83,11 @@ HTTPS_PROXY=http://127.0.0.1:7897
 在终端或 IDE 底部 Terminal 中运行一键启动脚本：
 ```bash
 ./start.sh
+# 或显式指定所属 IDE 模式（默认 auto 自动探测当前终端所属 IDE，实现专属独立监听）:
+# ./start.sh --ide cursor
+# ./start.sh --ide antigravity
 ```
-> **自动自愈特性**：`start.sh` 会自动检测并使用 `uv` 隔离创建 `.venv` 虚拟环境、自动加载依赖，并在异常网络抖动时具备毫秒级自愈重启能力。
+> **IDE 隔离与专属绑定**：系统会自动嗅探当前终端属于 **Cursor** 还是 **Antigravity IDE**，自动锁定当前 IDE 正在编辑的专属工程与对话转录，彻底杜绝跨 IDE 串音与重复感知。若长官在不同 IDE 中分别启动独立的 sidecar 终端实例，底层跨进程租约锁（`InterProcessSpeechLease`）会自动排队互斥，绝不抢麦踩音。
 
 ---
 

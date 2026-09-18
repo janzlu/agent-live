@@ -56,40 +56,79 @@ CHANNELS = 1
 CHUNK_SIZE = 1024
 
 
-def detect_active_workspace(default_ws: Optional[str] = None) -> str:
+def detect_current_ide() -> str:
     """
-    动态自动探测 Antigravity IDE 当前正在打开的活跃工作区。
-    优先读取 ~/Library/Application Support/Antigravity IDE/User/workspaceStorage 中最新活跃的工程。
-    引入时间戳窗口比对与目录有效性校验，消除多进程/多窗口竞态风险。
+    根据当前执行终端的环境变量与父进程特征，自动推断所属的 IDE（Cursor vs Antigravity）。
+    """
+    env = os.environ
+    if (
+        "CURSOR_AGENT" in env
+        or "CURSOR_REQUEST_ID" in env
+        or "CURSOR_CONVERSATION_ID" in env
+        or "AGENT_TRANSCRIPTS" in env
+        or "CURSOR_WORKSPACE_LABEL" in env
+    ):
+        return "cursor"
+    if "ANTIGRAVITY_TRAJECTORY_ID" in env:
+        return "antigravity"
+
+    code_cache = env.get("VSCODE_CODE_CACHE_PATH", "")
+    ipc_hook = env.get("VSCODE_IPC_HOOK", "")
+    nls = env.get("VSCODE_NLS_CONFIG", "")
+    blob = f"{code_cache} {ipc_hook} {nls}"
+    if "Cursor.app" in blob or "Support/Cursor" in blob:
+        return "cursor"
+    if "Antigravity IDE.app" in blob or "Support/Antigravity" in blob:
+        return "antigravity"
+
+    return "antigravity"
+
+
+def detect_active_workspace(default_ws: Optional[str] = None, ide_type: Optional[str] = None) -> str:
+    """
+    动态自动探测当前终端所属 IDE 当前正在打开的活跃工作区。
+    Cursor -> ~/Library/Application Support/Cursor/User/workspaceStorage
+    Antigravity -> ~/Library/Application Support/Antigravity IDE/User/workspaceStorage
     """
     import glob
     import json
     from urllib.parse import unquote, urlparse
 
-    storage_pattern = os.path.expanduser('~/Library/Application Support/Antigravity IDE/User/workspaceStorage/*')
-    storage_dirs = glob.glob(storage_pattern)
+    ide = ide_type or detect_current_ide()
+    if ide == "cursor":
+        storage_patterns = [
+            os.path.expanduser('~/Library/Application Support/Cursor/User/workspaceStorage/*'),
+            os.path.expanduser('~/Library/Application Support/Antigravity IDE/User/workspaceStorage/*'),
+        ]
+    else:
+        storage_patterns = [
+            os.path.expanduser('~/Library/Application Support/Antigravity IDE/User/workspaceStorage/*'),
+            os.path.expanduser('~/Library/Application Support/Cursor/User/workspaceStorage/*'),
+        ]
+
     valid_workspaces = []
-    for d in storage_dirs:
-        wp = os.path.join(d, 'workspace.json')
-        st = os.path.join(d, 'state.vscdb')
-        if os.path.exists(wp):
-            mtime_wp = os.path.getmtime(wp)
-            mtime_st = os.path.getmtime(st) if os.path.exists(st) else mtime_wp
-            # 记录最新活跃时间戳（取两者较大值）
-            active_mtime = max(mtime_wp, mtime_st)
-            try:
-                with open(wp, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    folder_uri = data.get('folder', '')
-                    if folder_uri.startswith('file://'):
-                        path = unquote(urlparse(folder_uri).path)
-                        # 确保目录真实存在且不是根目录/主目录
-                        if os.path.isdir(path) and path not in ('/', os.path.expanduser('~')):
-                            valid_workspaces.append((active_mtime, path))
-            except Exception:
-                pass
+    for pattern in storage_patterns:
+        for d in glob.glob(pattern):
+            wp = os.path.join(d, 'workspace.json')
+            st = os.path.join(d, 'state.vscdb')
+            if os.path.exists(wp):
+                mtime_wp = os.path.getmtime(wp)
+                mtime_st = os.path.getmtime(st) if os.path.exists(st) else mtime_wp
+                active_mtime = max(mtime_wp, mtime_st)
+                try:
+                    with open(wp, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        folder_uri = data.get('folder', '')
+                        if folder_uri.startswith('file://'):
+                            path = unquote(urlparse(folder_uri).path)
+                            if os.path.isdir(path) and path not in ('/', os.path.expanduser('~')):
+                                valid_workspaces.append((active_mtime, path))
+                except Exception:
+                    pass
+        if valid_workspaces:
+            break
+
     if valid_workspaces:
-        # 按最新活跃修改时间倒序排列，锁定当前处于前台编辑或活跃的工程
         valid_workspaces.sort(key=lambda x: x[0], reverse=True)
         return valid_workspaces[0][1]
 
@@ -444,8 +483,10 @@ async def run_live_session(
     voice_name: str,
     always_listen: bool = False,
     vad_silence_ms: int = 1500,
-    manual_confirm: bool = True
+    manual_confirm: bool = True,
+    ide_target: str = "auto",
 ):
+    resolved_ide = detect_current_ide() if ide_target == "auto" else ide_target
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("\n[错误] 未检测到 GEMINI_API_KEY 环境变量！", file=sys.stderr)
@@ -764,7 +805,7 @@ async def run_live_session(
                             print(" ★ 特性: AI 开始回复时自动闭麦，彻底杜绝外放回音自激！")
                             print(" ★ 优势: 平时静音，完全不影响 Typeless 语音打字！")
                         print(f" ★ 音色: {voice_name} | 引擎: {model_name}")
-                        print(" ★ 防回音: 已启用对讲机双向隔离 + 硬件回音抑制门限 (Echo Gate)")
+                        print(f" ★ 专属 IDE 协同模式: \033[1;36m{resolved_ide.upper()}\033[0m (独立监听专属工作区，绝不跨 IDE 串音)")
                         print(" ★ 挂载能力: Antigravity Pro (Gemini 3.8 Flash High) + Stitch MCP")
                         print(" ★ 按 Ctrl+C 退出会话")
                         print("="*62 + "\n")
@@ -1033,7 +1074,7 @@ async def run_live_session(
                                         if call.name == "get_ide_status_and_context":
                                             sys.stdout.write(f"\n\n\033[1;36m[IDE 上下文获取] 正在读取 IDE 聊天状态与执行进展...\033[0m\n")
                                             sys.stdout.flush()
-                                            snapshot = get_ide_chat_snapshot()
+                                            snapshot = get_ide_chat_snapshot(workspace_root=workspace_root, ide_target=resolved_ide)
                                             async with ws_send_lock:
                                                 await session.send_tool_response(
                                                     function_responses=[
@@ -1262,33 +1303,38 @@ async def run_live_session(
                         except Exception:
                             pass
 
-                    ide_watcher = IDEWatcher(
-                        poll_interval=0.5,
-                        on_completed=lambda t, s: on_ide_task_completed(t, s, source="antigravity"),
-                        on_user_input=lambda r: on_ide_user_input(r, source="antigravity"),
-                        on_error=lambda a, e: on_ide_error_detected(a, e, source="antigravity"),
-                        on_action=lambda a: on_ide_action(a, source="antigravity"),
-                        on_narration=lambda n: on_ide_narration(n, source="antigravity"),
-                    )
-                    cursor_watcher = CursorTranscriptWatcher(
-                        workspace_root=workspace_root,
-                        poll_interval=0.5,
-                        on_completed=lambda t, s: on_ide_task_completed(t, s, source="cursor"),
-                        on_user_input=lambda r: on_ide_user_input(r, source="cursor"),
-                        on_error=lambda a, e: on_ide_error_detected(a, e, source="cursor"),
-                        on_action=lambda a: on_ide_action(a, source="cursor"),
-                        on_narration=lambda n: on_ide_narration(n, source="cursor"),
-                    )
+                    watcher_tasks = []
+                    if resolved_ide in ("antigravity", "all"):
+                        ide_watcher = IDEWatcher(
+                            poll_interval=0.5,
+                            on_completed=lambda t, s: on_ide_task_completed(t, s, source="antigravity"),
+                            on_user_input=lambda r: on_ide_user_input(r, source="antigravity"),
+                            on_error=lambda a, e: on_ide_error_detected(a, e, source="antigravity"),
+                            on_action=lambda a: on_ide_action(a, source="antigravity"),
+                            on_narration=lambda n: on_ide_narration(n, source="antigravity"),
+                        )
+                        watcher_tasks.append(asyncio.create_task(ide_watcher.start(shutdown_event)))
 
-                    # 并发执行输入、接收、语音排队协调与 IDE/Cursor 双源监听（仅发生异常时退出重连）
+                    if resolved_ide in ("cursor", "all"):
+                        cursor_watcher = CursorTranscriptWatcher(
+                            workspace_root=workspace_root,
+                            poll_interval=0.5,
+                            on_completed=lambda t, s: on_ide_task_completed(t, s, source="cursor"),
+                            on_user_input=lambda r: on_ide_user_input(r, source="cursor"),
+                            on_error=lambda a, e: on_ide_error_detected(a, e, source="cursor"),
+                            on_action=lambda a: on_ide_action(a, source="cursor"),
+                            on_narration=lambda n: on_ide_narration(n, source="cursor"),
+                        )
+                        watcher_tasks.append(asyncio.create_task(cursor_watcher.start(shutdown_event)))
+
+                    # 并发执行输入、接收、语音排队协调与专属 IDE 监听（仅发生异常时退出重连）
+                    core_tasks = [
+                        asyncio.create_task(send_mic_loop()),
+                        asyncio.create_task(receive_loop()),
+                        asyncio.create_task(speech_coordinator.worker_loop(shutdown_event)),
+                    ]
                     done, pending = await asyncio.wait(
-                        [
-                            asyncio.create_task(send_mic_loop()),
-                            asyncio.create_task(receive_loop()),
-                            asyncio.create_task(speech_coordinator.worker_loop(shutdown_event)),
-                            asyncio.create_task(ide_watcher.start(shutdown_event)),
-                            asyncio.create_task(cursor_watcher.start(shutdown_event)),
-                        ],
+                        core_tasks + watcher_tasks,
                         return_when=asyncio.FIRST_EXCEPTION
                     )
                     for p in pending:
@@ -1350,6 +1396,7 @@ def main():
     parser.add_argument("--always-listen", action="store_true", help="禁用 Push-to-Talk，开启全双工持续监听常驻")
     parser.add_argument("--vad-silence-ms", type=int, default=int(os.getenv("VAD_SILENCE_MS", "1500")), help="静音断句容忍延时 (毫秒，默认 1500ms，为长官预留充足说话思考时间)")
     parser.add_argument("--auto-reply", action="store_true", default=os.getenv("AUTO_REPLY", "false").lower() in ("true", "1", "yes"), help="开启停顿自动回复（默认关闭，采用手动确认对讲模式：开麦畅所欲言，说完再次按 Ctrl+Space 确认发送，彻底杜绝抢话打断）")
+    parser.add_argument("--ide", type=str, default="auto", choices=["auto", "cursor", "antigravity", "all"], help="指定当前终端专属协同的 IDE 模式 (默认 auto: 自动识别当前终端所属 IDE)")
     args = parser.parse_args()
 
     if args.list_devices:
@@ -1363,7 +1410,7 @@ def main():
     # 动态锁定活跃工作区：优先命令行显式指定；未指定时自动探测 IDE 当前正在打开的活跃工程，杜绝路径逃逸
     target_workspace = args.workspace
     if not target_workspace or not os.path.isdir(target_workspace):
-        target_workspace = detect_active_workspace()
+        target_workspace = detect_active_workspace(ide_type=args.ide)
 
     target_path = Path(target_workspace).resolve()
     project_meta = get_project_grounding_info(str(target_path))
@@ -1388,7 +1435,8 @@ def main():
             args.voice,
             always_listen=args.always_listen,
             vad_silence_ms=args.vad_silence_ms,
-            manual_confirm=manual_confirm
+            manual_confirm=manual_confirm,
+            ide_target=args.ide,
         ))
     except (KeyboardInterrupt, SystemExit):
         sys.exit(0)
