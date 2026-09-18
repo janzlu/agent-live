@@ -10,11 +10,12 @@
 在传统 AI 编程中，开发者通常在“不断打字描述需求”与“等待大模型输出”之间来回切换。  
 **Agent Live** 彻底打破这种割裂，作为您常驻的“外置语音军师”与“敏捷执行工程师”：
 
-1. **⚡ 端到端全双工实时语音**：基于 Google Gemini 3.8 Live 原生多模态 WebSocket 管道，毫秒级响应，支持随时插话打断（Barge-in）。
+1. **⚡ 端到端全双工实时语音**：基于 Google Gemini 3.8 Live 原生多模态 WebSocket 管道，毫秒级响应，支持随时插话打断（Barge-in）。原生配置 `zh-CN` 标准普通话（北方官话播音腔），字正腔圆，杜绝怪异方言与幻觉。
 2. **🔘 全局呼叫热键 (Push-to-Talk, `Ctrl+Space`)**：系统级全局捕获。无论您在 Cursor 中浏览代码、在浏览器查阅文档，还是在调试终端，随手一按即可开麦对讲。
 3. **📊 动态战况仪表盘 (Tactical HUD)**：直接内嵌在 IDE 底部终端，以丰富 ANSI 终端色彩实时可视化展现麦克风拾音能量条、当前对讲状态、实施工程师后台动作与实时伴随字幕。
-4. **🛠️ 本地工程直连执行引擎 (Direct Engineering Engine)**：支持通过口头下发指令（如*“帮我检查一下当前分支状态”*、*“跑一下所有单元测试并汇报”*），内置引擎直接在当前工作区安全执行并语音向您汇报军规级战报。
-5. **🛡️ 硬件回音抑制门限 (Echo Gate) 与双向隔离**：AI 开口回复瞬间自动毫秒级闭麦，彻底消灭外放扬声器引起的音频自激；平时保持静音，绝不干扰您的 Typeless 语音输入法或日常办公。
+4. **👁️ Cursor & Antigravity 双源实时感知总线**：同时并发监听 Antigravity 与 Cursor 本地 Agent 对话转录（`~/.cursor/projects/<slug>/agent-transcripts/*.jsonl`），智能识别用户提问、工具调用（`Read`/`Write`/`Grep`/`Shell` 等）与任务结束事件，并在后台通过防抖总线进行语音伴随解说与战报播报。
+5. **🛠️ 本地工程直连执行引擎 (Direct Engineering Engine)**：支持通过口头下发指令（如*“帮我检查一下当前分支状态”*、*“跑一下所有单元测试并汇报”*），内置引擎直接在当前工作区安全执行并语音向您汇报军规级战报。
+6. **🛡️ 硬件回音抑制门限 (Echo Gate) 与双向隔离**：AI 开口回复瞬间自动毫秒级闭麦，彻底消灭外放扬声器引起的音频自激；平时保持静音，绝不干扰您的 Typeless 语音输入法或日常办公。
 
 ---
 
@@ -22,7 +23,7 @@
 
 | 编程工具 | 适配程度 | 使用方式与体验 |
 | :--- | :---: | :--- |
-| **Cursor** | **原生完美适配** | 直接常驻于 Cursor 底部 `Terminal` 面板；与 Cursor Composer / Chat 优势互补、并行不悖；支持 `folderOpen` 打开项目自动启动。 |
+| **Cursor** | **原生深度协同** | 直接常驻于 Cursor 底部 `Terminal` 面板；**内置 Cursor Transcript 实时监听引擎**，自动映射工程并追踪 Cursor Agent 交互过程与工具调用，提供语音伴随解说与任务完成口播。 |
 | **Antigravity IDE** | **原生深度协同** | 完美联动；支持伴随解说总线、实时感知实施工程师工具调用轨迹并脱口播报战报。 |
 | **VS Code / Windsurf** | **原生完美适配** | 完全兼容 VS Code 及其所有衍生产品；内置 `.vscode/tasks.json` 一键即开。 |
 | **独立终端 (Terminal / iTerm / WezTerm / Ghostty)** | **系统级全支持** | 可以在任何终端作为独立的浮动桌面语音副驾使用，配合 JetBrains、Xcode、Neovim 等任意开发环境。 |
@@ -163,12 +164,13 @@ agent-live/
 ├── start.sh                  # 一键环境自检、依赖自愈与启动脚本
 ├── ensure_running.sh         # 跨 IDE 智能感知与唤醒器 (自动在 Cursor/Antigravity 中打开终端)
 ├── live_sidecar.py           # 核心引擎: Gemini 3.8 Live 双向多模态 WebSocket 管道、PTT调度与强占切断
-├── ide_watcher.py            # IDE 动作感知与事件总线 (支持动作防抖聚合与字幕纯化)
+├── ide_watcher.py            # IDE 动作感知总线 (支持 Antigravity 与 Cursor 双源对话转录监听、动作防抖聚合与字幕纯化)
 ├── antigravity_runner.py     # 本地工程直连执行引擎 (Direct Engine) 与自动化任务派单器
 ├── mcp_loader.py             # 标准 MCP 协议加载器与工具注册模块
 ├── .vscode/
 │   ├── tasks.json            # VS Code / Cursor 开箱即用任务配置文件
 │   └── settings.json         # 自动任务静默授权配置
+├── test_cursor_transcript_watcher.py # Cursor 转录监听、动作抽取与任务完成口播测试套件
 └── test_*.py                 # 针对强占打断、防抖聚合与执行引擎的单元与集成测试套件
 ```
 

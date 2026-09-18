@@ -45,7 +45,7 @@ if not logger.handlers:
 from google import genai
 from google.genai import types
 from antigravity_runner import AntigravityRunner
-from ide_watcher import get_ide_chat_snapshot, IDEWatcher, sanitize_for_speech
+from ide_watcher import get_ide_chat_snapshot, IDEWatcher, CursorTranscriptWatcher, sanitize_for_speech
 
 # 音频参数
 INPUT_SAMPLE_RATE = 16000
@@ -147,7 +147,15 @@ class NoiseGate:
     2. 动态调整人声判决门限: threshold = max(noise_floor * 1.85, base_min_threshold)；
     3. 配合 Hangover 平滑防吞字缓冲，彻底平衡强抗噪与高灵敏度拾音，杜绝吞首字。
     """
-    def __init__(self, base_min_threshold: float = 120.0, hangover_ms: int = 350, frame_duration_ms: int = 20):
+    def __init__(
+        self,
+        base_min_threshold: float = 120.0,
+        hangover_ms: int = 350,
+        frame_duration_ms: int = 20,
+        threshold: Optional[float] = None,
+    ):
+        if threshold is not None:
+            base_min_threshold = threshold
         self.base_min_threshold = base_min_threshold
         self.noise_floor = base_min_threshold * 0.5  # 初始底噪估算值
         self.hangover_frames = int(hangover_ms / frame_duration_ms)
@@ -460,7 +468,9 @@ async def run_live_session(
         f"4. 本工程业务范围包括：{modules_str}；\n"
         "5. 【严禁跨越业务边界臆造任务】：只在当前工程的业务范畴内理解长官需求！绝对严禁凭空臆造无关系统（如网络等保、非本工程外来系统等），遇到含糊不清或与当前工程无关的词汇，必须保持怀疑并向长官反问核实，绝不私自立项派单！\n\n"
         "【★ 语言纯正性与防底噪脑补铁律（绝对锁死中文普通话，杜绝幻觉）】：\n"
-        "1. 【纯正中文普通话】：全程 100% 仅使用纯正中文普通话交流！语调清亮悦耳、字正腔圆，严禁怪异口音与机械顿挫；\n"
+        "1. 【标准中文普通话】：全程 100% 仅使用中国大陆标准普通话（北方官话播音腔）交流！"
+        "吐字清晰、字正腔圆、语速适中；严禁粤语/闽南语/港台腔、方言口音、英语腔或中英夹杂整句；"
+        "专有名词可按字母分读（如 A-P-I），但语句骨架必须是标准普通话；\n"
         "2. 【底噪与模糊音节绝对静默铁律（严禁脑补）】：当长官未说话，麦克风仅采集到环境底噪、电流杂音、呼吸声、叹气、按键敲击或模糊不清的零碎音节时，必须保持 100% 绝对静默！绝对严禁凭空臆造任何词句或任务，绝对不可自说自话回答，绝对禁止调用任何工具！\n"
         "3. 只有清晰听到长官完整、有明确意图的发言时才作答；若偶有字音微弱含糊，直接礼貌反问核实：'长官，刚才声音有点模糊，请问您是指...吗？'，绝不擅自揣测派单！\n\n"
         "【★ 核心语言与发音军规（严守播音品质）】：\n"
@@ -499,6 +509,7 @@ async def run_live_session(
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         speech_config=types.SpeechConfig(
+            language_code="zh-CN",
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
             )
@@ -1227,13 +1238,23 @@ async def run_live_session(
                         on_action=on_ide_action,
                         on_narration=on_ide_narration,
                     )
+                    cursor_watcher = CursorTranscriptWatcher(
+                        workspace_root=workspace_root,
+                        poll_interval=0.5,
+                        on_completed=on_ide_task_completed,
+                        on_user_input=on_ide_user_input,
+                        on_error=on_ide_error_detected,
+                        on_action=on_ide_action,
+                        on_narration=on_ide_narration,
+                    )
 
-                    # 并发执行输入、接收与 IDE 监听（仅发生异常时退出重连）
+                    # 并发执行输入、接收与 IDE/Cursor 双源监听（仅发生异常时退出重连）
                     done, pending = await asyncio.wait(
                         [
                             asyncio.create_task(send_mic_loop()),
                             asyncio.create_task(receive_loop()),
                             asyncio.create_task(ide_watcher.start(shutdown_event)),
+                            asyncio.create_task(cursor_watcher.start(shutdown_event)),
                         ],
                         return_when=asyncio.FIRST_EXCEPTION
                     )
