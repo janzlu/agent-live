@@ -400,13 +400,22 @@ class PTTController:
         self.last_print_time = 0.0
         self.has_spoken = False
         self.last_voice_time = 0.0
+        self.is_streaming_subtitle = False
+
+    def write_log(self, text: str):
+        """安全输出事件日志：擦除底行状态栏，输出日志行，然后重新绘制底部状态栏，绝不留下残留重复行"""
+        sys.stdout.write(f"\r\033[K{text}\n")
+        sys.stdout.flush()
+        if not self.is_streaming_subtitle:
+            self.print_status()
 
     def update_dashboard(self, ide_action: Optional[str] = None, advisor_status: Optional[str] = None):
         if ide_action is not None:
             self.current_ide_action = ide_action
         if advisor_status is not None:
             self.current_advisor_status = advisor_status
-        self.print_status()
+        if not self.is_streaming_subtitle:
+            self.print_status()
 
     def toggle(self):
         if self.always_listen:
@@ -423,7 +432,8 @@ class PTTController:
             self.is_active = False
             self.just_muted = True
             self.is_voice_active = False
-            self.print_status()
+            if not self.is_streaming_subtitle:
+                self.print_status()
 
     def unmute(self):
         if self.always_listen:
@@ -437,9 +447,12 @@ class PTTController:
             self.last_voice_time = time.time()
             if self.on_unmute:
                 self.on_unmute()
-            self.print_status()
+            if not self.is_streaming_subtitle:
+                self.print_status()
 
     def print_status(self):
+        if self.is_streaming_subtitle:
+            return
         import shutil
         cols = max(40, shutil.get_terminal_size((80, 24)).columns)
         vol_meter = self._render_volume_bar(self.last_volume, self.is_voice_active)
@@ -652,8 +665,8 @@ async def run_live_session(
                 pass
             audio_in_queue.put_nowait(chunk)
 
-    # 禁用终端自动换行 (DECAWM)，从终端底层彻底杜绝折行与刷屏
-    sys.stdout.write("\033[?7l")
+    # 启用终端标准自动换行 (DECAWM)，确保中文字符串在边界正常排版，杜绝半字符截断与乱码
+    sys.stdout.write("\033[?7h")
     sys.stdout.flush()
 
     def on_unmute_callback():
@@ -986,13 +999,15 @@ async def run_live_session(
                     # 派单任务后台异步执行与军规级主动语音汇报
                     async def run_dispatched_task(task_desc: str, authorized: bool = False, category: str = "general"):
                         mode_str = "已授权实操" if authorized else "只读分析模式"
-                        sys.stdout.write(f"\n\033[1;32m{'='*65}\033[0m\n")
-                        sys.stdout.write(f"\033[1;32m★ [派单司令塔] 长官口头派单 ->【实施工程师】已成功接单！\033[0m\n")
-                        sys.stdout.write(f"\033[1;37m需求指令: {task_desc}\033[0m\n")
-                        sys.stdout.write(f"\033[1;36m任务分类: {category} | 授权状态: {mode_str}\033[0m\n")
-                        sys.stdout.write(f"\033[1;33m提示: 语音通话保持畅通，您可以随时按 Ctrl+Space 开麦继续交流！\033[0m\n")
-                        sys.stdout.write(f"\033[1;32m{'='*65}\033[0m\n\n")
-                        sys.stdout.flush()
+                        banner = (
+                            f"\033[1;32m{'='*65}\033[0m\n"
+                            f"\033[1;32m★ [派单司令塔] 长官口头派单 ->【实施工程师】已成功接单！\033[0m\n"
+                            f"\033[1;37m需求指令: {task_desc}\033[0m\n"
+                            f"\033[1;36m任务分类: {category} | 授权状态: {mode_str}\033[0m\n"
+                            f"\033[1;33m提示: 语音通话保持畅通，您可以随时按 Ctrl+Space 开麦继续交流！\033[0m\n"
+                            f"\033[1;32m{'='*65}\033[0m"
+                        )
+                        ptt.write_log(banner)
 
                         try:
                             task_output = await runner.run_task(task_desc, authorized=authorized)
@@ -1001,8 +1016,7 @@ async def run_live_session(
                             task_output = f"执行出错: {e}"
                             is_error = True
 
-                        sys.stdout.write(f"\n\033[1;32m[派单任务执行完毕] 正在通过排队总线向长官通报结果...\033[0m\n\n")
-                        sys.stdout.flush()
+                        ptt.write_log("\033[1;32m[派单任务执行完毕] 正在通过排队总线向长官通报结果...\033[0m")
 
                         try:
                             clean_task = sanitize_for_speech(task_desc, max_chars=60)
@@ -1035,198 +1049,148 @@ async def run_live_session(
                                 )
                             )
                         except Exception as e:
-                            sys.stdout.write(f"[派单汇报推送排队异常] {e}\n")
+                            ptt.write_log(f"\033[1;31m[派单汇报推送排队异常] {e}\033[0m")
 
                     # 任务 C: 接收服务端消息（持续多轮监听，绝不单轮退出）
                     async def receive_loop():
                         nonlocal is_ai_speaking
                         ai_subtitle_streaming = False
-                        while not shutdown_event.is_set():
-                            async for response in session.receive():
-                                if shutdown_event.is_set():
-                                    break
-                                sc = response.server_content
-                                if sc:
-                                    # 1. 检测服务端打断信号：仅当长官主动开麦或全双工模式下才允许打断！
-                                    if sc.interrupted:
-                                        if ptt.is_active or ptt.always_listen:
-                                            while not audio_out_queue.empty():
-                                                try:
-                                                    audio_out_queue.get_nowait()
-                                                except asyncio.QueueEmpty:
-                                                    break
-                                            is_ai_speaking = False
-                                            speech_coordinator.cancel_transient()
-                                            if ai_subtitle_streaming:
-                                                sys.stdout.write(" \033[1;33m[语音已打断]\033[0m\n")
-                                                sys.stdout.flush()
-                                                ai_subtitle_streaming = False
-                                        else:
-                                            # 长官处于静音状态，此打断属于网络残包或回声误触发，坚决忽略，继续完整播放 AI 语音！
-                                            pass
-
-                                    # 2. 话语权守护：长官开麦后若 AI 开始回复，自动切换为闭麦倾听模式，彻底杜绝外放回音并立即播放！
-                                    if sc.model_turn and ptt.is_active and not ptt.always_listen:
-                                        ptt.mute()
-
-                                    # 3. 实时打印开发者语音转写，并驱动军规确认门禁状态机
-                                    if sc.input_transcription and sc.input_transcription.text:
-                                        speech_text = sc.input_transcription.text
-                                        confirmation_gate.observe_user_speech(speech_text)
-                                        logger.info(f"[长官语音] {speech_text}")
-                                        if ai_subtitle_streaming:
-                                            sys.stdout.write("\n")
-                                            sys.stdout.flush()
-                                            ai_subtitle_streaming = False
-                                        sys.stdout.write(f"\r\033[K\033[1;34m[你识别为]\033[0m {speech_text}\n")
-                                        sys.stdout.flush()
-
-                                    # 4. 实时流式平滑打印 AI 语音回复字幕（聚合在同一行，杜绝碎包换行）
-                                    if sc.output_transcription and sc.output_transcription.text:
-                                        if not ai_subtitle_streaming:
-                                            sys.stdout.write("\033[1;35m[AI字幕]\033[0m ")
-                                            ai_subtitle_streaming = True
-                                        sys.stdout.write(sc.output_transcription.text)
-                                        sys.stdout.flush()
-
-                                    # 5. 处理语音音频数据包 (带防爆仓抛弃老帧机制)
-                                    if sc.model_turn:
-                                        if not ptt.always_listen and ptt.is_active:
-                                            ptt.mute()
-                                        is_ai_speaking = True
-                                        for part in sc.model_turn.parts:
-                                            if part.text and not sc.output_transcription:
-                                                if not ai_subtitle_streaming:
-                                                    sys.stdout.write("\033[1;35m[AI字幕]\033[0m ")
-                                                    ai_subtitle_streaming = True
-                                                sys.stdout.write(part.text)
-                                                sys.stdout.flush()
-                                            if part.inline_data and part.inline_data.mime_type.startswith("audio/pcm"):
-                                                audio_chunk = np.frombuffer(part.inline_data.data, dtype=np.int16)
-                                                if audio_out_queue.full():
+                        try:
+                            while not shutdown_event.is_set():
+                                async for response in session.receive():
+                                    if shutdown_event.is_set():
+                                        break
+                                    sc = response.server_content
+                                    if sc:
+                                        # 1. 检测服务端打断信号：仅当长官主动开麦或全双工模式下才允许打断！
+                                        if sc.interrupted:
+                                            if ptt.is_active or ptt.always_listen:
+                                                while not audio_out_queue.empty():
                                                     try:
                                                         audio_out_queue.get_nowait()
-                                                    except Exception:
-                                                        pass
-                                                try:
-                                                    audio_out_queue.put_nowait(audio_chunk)
-                                                except asyncio.QueueFull:
-                                                    pass
+                                                    except asyncio.QueueEmpty:
+                                                        break
+                                                is_ai_speaking = False
+                                                speech_coordinator.cancel_transient()
+                                                if ai_subtitle_streaming:
+                                                    sys.stdout.write(" \033[1;33m[语音已打断]\033[0m\n")
+                                                    sys.stdout.flush()
+                                                    ai_subtitle_streaming = False
+                                                    ptt.is_streaming_subtitle = False
+                                                ptt.print_status()
+                                            else:
+                                                # 长官处于静音状态，此打断属于网络残包或回声误触发，坚决忽略，继续完整播放 AI 语音！
+                                                pass
 
-                                    # 6. 一轮对话完成，强制静音麦克风，杜绝空闲底噪与回音误触发
-                                    if sc.turn_complete:
+                                        # 2. 话语权守护：长官开麦后若 AI 开始回复，自动切换为闭麦倾听模式，彻底杜绝外放回音并立即播放！
+                                        if sc.model_turn and ptt.is_active and not ptt.always_listen:
+                                            ptt.mute()
+
+                                        # 3. 实时打印开发者语音转写，并驱动军规确认门禁状态机
+                                        if sc.input_transcription and sc.input_transcription.text:
+                                            speech_text = sc.input_transcription.text
+                                            confirmation_gate.observe_user_speech(speech_text)
+                                            logger.info(f"[长官语音] {speech_text}")
+                                            if ai_subtitle_streaming:
+                                                sys.stdout.write("\n")
+                                                sys.stdout.flush()
+                                                ai_subtitle_streaming = False
+                                                ptt.is_streaming_subtitle = False
+                                            ptt.write_log(f"\033[1;34m[你识别为]\033[0m {speech_text}")
+
+                                        # 4. 实时流式平滑打印 AI 语音回复字幕（独立行首，自动换行，杜绝碎片折行与乱码）
+                                        if sc.output_transcription and sc.output_transcription.text:
+                                            if not ai_subtitle_streaming:
+                                                ai_subtitle_streaming = True
+                                                ptt.is_streaming_subtitle = True
+                                                sys.stdout.write("\r\033[K\033[1;35m[AI字幕]\033[0m ")
+                                            sys.stdout.write(sc.output_transcription.text)
+                                            sys.stdout.flush()
+
+                                        # 5. 处理语音音频数据包 (带防爆仓抛弃老帧机制)
+                                        if sc.model_turn:
+                                            if not ptt.always_listen and ptt.is_active:
+                                                ptt.mute()
+                                            is_ai_speaking = True
+                                            for part in sc.model_turn.parts:
+                                                if part.text and not sc.output_transcription:
+                                                    if not ai_subtitle_streaming:
+                                                        ai_subtitle_streaming = True
+                                                        ptt.is_streaming_subtitle = True
+                                                        sys.stdout.write("\r\033[K\033[1;35m[AI字幕]\033[0m ")
+                                                    sys.stdout.write(part.text)
+                                                    sys.stdout.flush()
+                                                if part.inline_data and part.inline_data.mime_type.startswith("audio/pcm"):
+                                                    audio_chunk = np.frombuffer(part.inline_data.data, dtype=np.int16)
+                                                    if audio_out_queue.full():
+                                                        try:
+                                                            audio_out_queue.get_nowait()
+                                                        except Exception:
+                                                            pass
+                                                    try:
+                                                        audio_out_queue.put_nowait(audio_chunk)
+                                                    except asyncio.QueueFull:
+                                                        pass
+
+                                        # 6. 一轮对话完成，强制静音麦克风，杜绝空闲底噪与回音误触发
+                                        if sc.turn_complete:
+                                            if ai_subtitle_streaming:
+                                                sys.stdout.write("\n")
+                                                sys.stdout.flush()
+                                                ai_subtitle_streaming = False
+                                                ptt.is_streaming_subtitle = False
+                                            if not ptt.always_listen:
+                                                ptt.mute()
+                                            ptt.print_status()
+
+                                    # 7. 调度执行 Tool Call (模式 A 工具集)
+                                    if response.tool_call:
                                         if ai_subtitle_streaming:
                                             sys.stdout.write("\n")
                                             sys.stdout.flush()
                                             ai_subtitle_streaming = False
-                                        if not ptt.always_listen:
-                                            ptt.mute()
-                                        ptt.print_status()
+                                            ptt.is_streaming_subtitle = False
+                                        for call in response.tool_call.function_calls:
+                                            if call.name == "get_ide_status_and_context":
+                                                ptt.write_log("\033[1;36m[IDE 上下文获取] 正在读取 IDE 聊天状态与执行进展...\033[0m")
+                                                snapshot = get_ide_chat_snapshot(workspace_root=workspace_root, ide_target=resolved_ide)
+                                                async with ws_send_lock:
+                                                    await session.send_tool_response(
+                                                        function_responses=[
+                                                            types.FunctionResponse(
+                                                                name=call.name,
+                                                                id=call.id,
+                                                                response=snapshot
+                                                            )
+                                                        ]
+                                                    )
+                                                if not ptt.always_listen:
+                                                    ptt.mute()
+                                                ptt.print_status()
 
-                                # 7. 调度执行 Tool Call (模式 A 工具集)
-                                if response.tool_call:
-                                    if ai_subtitle_streaming:
-                                        sys.stdout.write("\n")
-                                        sys.stdout.flush()
-                                        ai_subtitle_streaming = False
-                                    for call in response.tool_call.function_calls:
-                                        if call.name == "get_ide_status_and_context":
-                                            sys.stdout.write(f"\n\n\033[1;36m[IDE 上下文获取] 正在读取 IDE 聊天状态与执行进展...\033[0m\n")
-                                            sys.stdout.flush()
-                                            snapshot = get_ide_chat_snapshot(workspace_root=workspace_root, ide_target=resolved_ide)
-                                            async with ws_send_lock:
-                                                await session.send_tool_response(
-                                                    function_responses=[
-                                                        types.FunctionResponse(
-                                                            name=call.name,
-                                                            id=call.id,
-                                                            response=snapshot
-                                                        )
-                                                    ]
-                                                )
-                                            if not ptt.always_listen:
-                                                ptt.mute()
-                                            ptt.print_status()
+                                            elif call.name == "read_ide_implementation_plan":
+                                                ptt.write_log("\033[1;36m[IDE 方案读取] 正在读取实施方案与总结报告...\033[0m")
+                                                snapshot = get_ide_chat_snapshot()
+                                                plan_path = snapshot.get("plan_path")
+                                                plan_text = ""
+                                                if plan_path and os.path.exists(plan_path):
+                                                    try:
+                                                        with open(plan_path, "r", encoding="utf-8") as f:
+                                                            plan_text = f.read(2000)
+                                                    except Exception as e:
+                                                        plan_text = f"读取方案失败: {e}"
+                                                else:
+                                                    conv_id = snapshot.get("conversation_id")
+                                                    if conv_id:
+                                                        walk_path = os.path.expanduser(f"~/.gemini/antigravity-ide/brain/{conv_id}/walkthrough.md")
+                                                        if os.path.exists(walk_path):
+                                                            try:
+                                                                with open(walk_path, "r", encoding="utf-8") as f:
+                                                                    plan_text = f.read(2000)
+                                                            except Exception:
+                                                                pass
 
-                                        elif call.name == "read_ide_implementation_plan":
-                                            sys.stdout.write(f"\n\n\033[1;36m[IDE 方案读取] 正在读取实施方案与总结报告...\033[0m\n")
-                                            sys.stdout.flush()
-                                            snapshot = get_ide_chat_snapshot()
-                                            plan_path = snapshot.get("plan_path")
-                                            plan_text = ""
-                                            if plan_path and os.path.exists(plan_path):
-                                                try:
-                                                    with open(plan_path, "r", encoding="utf-8") as f:
-                                                        plan_text = f.read(2000)
-                                                except Exception as e:
-                                                    plan_text = f"读取方案失败: {e}"
-                                            else:
-                                                conv_id = snapshot.get("conversation_id")
-                                                if conv_id:
-                                                    walk_path = os.path.expanduser(f"~/.gemini/antigravity-ide/brain/{conv_id}/walkthrough.md")
-                                                    if os.path.exists(walk_path):
-                                                        try:
-                                                            with open(walk_path, "r", encoding="utf-8") as f:
-                                                                plan_text = f.read(2000)
-                                                        except Exception:
-                                                            pass
-
-                                            clean_plan = sanitize_for_speech(plan_text, max_chars=400) if plan_text else ""
-                                            async with ws_send_lock:
-                                                await session.send_tool_response(
-                                                    function_responses=[
-                                                        types.FunctionResponse(
-                                                            name=call.name,
-                                                            id=call.id,
-                                                            response={
-                                                                "found": bool(clean_plan),
-                                                                "content": clean_plan or "当前尚未生成实施方案或总结报告文件。",
-                                                            }
-                                                        )
-                                                    ]
-                                                )
-                                            if not ptt.always_listen:
-                                                ptt.mute()
-                                            ptt.print_status()
-
-                                        elif call.name in ("shutdown_sidecar", "stop_voice_copilot"):
-                                            sys.stdout.write(f"\n\n\033[1;31m[明确关闭指令] 收到长官明确口令指示，正在退出语音副驾...\033[0m\n")
-                                            sys.stdout.flush()
-                                            async with ws_send_lock:
-                                                await session.send_tool_response(
-                                                    function_responses=[
-                                                        types.FunctionResponse(
-                                                            name=call.name,
-                                                            id=call.id,
-                                                            response={"status": "shutting_down", "message": "遵命长官，语音副驾已为您关闭，随时待命！"}
-                                                        )
-                                                    ]
-                                                )
-                                            # 写入明确停止标记，告知守护脚本停止自愈重启
-                                            set_explicit_stop_flag(resolved_ide)
-                                            await asyncio.sleep(0.8)
-                                            shutdown_event.set()
-                                            break
-
-                                        elif call.name in ("dispatch_task_to_engineer", "execute_antigravity_task"):
-                                            task_prompt = call.args.get("task_prompt") or call.args.get("task_description", "")
-                                            category = call.args.get("task_category", "general")
-                                            allow_mod = call.args.get("allow_modification")
-                                            if allow_mod is None:
-                                                allow_mod = call.args.get("authorized", False)
-
-                                            # 口头语义智能提权：长官只要说修改、修复、实现、跑测试等动词，判定为长官口头派单实操
-                                            action_verbs = ["改", "修", "加", "删", "写", "跑", "测试", "实现", "优化", "重构"]
-                                            if any(v in task_prompt for v in action_verbs):
-                                                allow_mod = True
-
-                                            # ★【军规级两阶段确认物理硬门禁】：未获长官明确口头确认，坚决物理拦截，绝不抢跑！
-                                            passed, reason = confirmation_gate.verify_and_consume(task_prompt)
-                                            if not passed:
-                                                metrics.blocked_attempts_count += 1
-                                                logger.warning(f"[军规硬门禁拦截抢跑] 任务='{task_prompt}', 原因='{reason}'")
-                                                sys.stdout.write(f"\n\033[1;33m[军规硬门禁拦截] 拦截擅自抢跑派单: {task_prompt[:35]}... -> 逼退复述请示\033[0m\n")
-                                                sys.stdout.flush()
+                                                clean_plan = sanitize_for_speech(plan_text, max_chars=400) if plan_text else ""
                                                 async with ws_send_lock:
                                                     await session.send_tool_response(
                                                         function_responses=[
@@ -1234,9 +1198,8 @@ async def run_live_session(
                                                                 name=call.name,
                                                                 id=call.id,
                                                                 response={
-                                                                    "status": "blocked_by_military_gate",
-                                                                    "passed": False,
-                                                                    "instruction": reason
+                                                                    "found": bool(clean_plan),
+                                                                    "content": clean_plan or "当前尚未生成实施方案或总结报告文件。",
                                                                 }
                                                             )
                                                         ]
@@ -1244,45 +1207,103 @@ async def run_live_session(
                                                 if not ptt.always_listen:
                                                     ptt.mute()
                                                 ptt.print_status()
-                                                continue
 
-                                            metrics.dispatched_tasks_count += 1
-                                            logger.info(f"[门禁放行派单] 任务='{task_prompt}', 授权实操={allow_mod}, 类别={category}")
-                                            sys.stdout.write(f"\n\n\033[1;32m[派单司令塔] 长官已口头确认，准予执行: {task_prompt} (实操权限: {allow_mod})\033[0m\n")
-                                            sys.stdout.flush()
+                                            elif call.name in ("shutdown_sidecar", "stop_voice_copilot"):
+                                                ptt.write_log("\033[1;31m[明确关闭指令] 收到长官明确口令指示，正在退出语音副驾...\033[0m")
+                                                async with ws_send_lock:
+                                                    await session.send_tool_response(
+                                                        function_responses=[
+                                                            types.FunctionResponse(
+                                                                name=call.name,
+                                                                id=call.id,
+                                                                response={"status": "shutting_down", "message": "遵命长官，语音副驾已为您关闭，随时待命！"}
+                                                            )
+                                                        ]
+                                                    )
+                                                # 写入明确停止标记，告知守护脚本停止自愈重启
+                                                set_explicit_stop_flag(resolved_ide)
+                                                await asyncio.sleep(0.8)
+                                                shutdown_event.set()
+                                                break
 
-                                            # 1. 毫秒级返回 ToolResponse，消除阻塞
-                                            async with ws_send_lock:
-                                                await session.send_tool_response(
-                                                    function_responses=[
-                                                        types.FunctionResponse(
-                                                            name=call.name,
-                                                            id=call.id,
-                                                            response={
-                                                                "status": "dispatched",
-                                                                "authorized": allow_mod,
-                                                                "message": (
-                                                                    f"任务【{task_prompt}】已成功分派至后台实施工程师执行（{'已授权实操' if allow_mod else '只读分析'}）。"
-                                                                    f"请立即用极其干练的一句话向长官回执（必须以'报告 长官！'开头）：'报告 长官！任务已派发给实施工程师，正在执行：{task_prompt[:35]}，请稍候。'，"
-                                                                    "并说明在此期间长官可以随时继续正常交谈。"
+                                            elif call.name in ("dispatch_task_to_engineer", "execute_antigravity_task"):
+                                                task_prompt = call.args.get("task_prompt") or call.args.get("task_description", "")
+                                                category = call.args.get("task_category", "general")
+                                                allow_mod = call.args.get("allow_modification")
+                                                if allow_mod is None:
+                                                    allow_mod = call.args.get("authorized", False)
+
+                                                # 口头语义智能提权：长官只要说修改、修复、实现、跑测试等动词，判定为长官口头派单实操
+                                                action_verbs = ["改", "修", "加", "删", "写", "跑", "测试", "实现", "优化", "重构"]
+                                                if any(v in task_prompt for v in action_verbs):
+                                                    allow_mod = True
+
+                                                # ★【军规级两阶段确认物理硬门禁】：未获长官明确口头确认，坚决物理拦截，绝不抢跑！
+                                                passed, reason = confirmation_gate.verify_and_consume(task_prompt)
+                                                if not passed:
+                                                    metrics.blocked_attempts_count += 1
+                                                    logger.warning(f"[军规硬门禁拦截抢跑] 任务='{task_prompt}', 原因='{reason}'")
+                                                    ptt.write_log(f"\033[1;33m[军规硬门禁拦截] 拦截擅自抢跑派单: {task_prompt[:35]}... -> 逼退复述请示\033[0m")
+                                                    async with ws_send_lock:
+                                                        await session.send_tool_response(
+                                                            function_responses=[
+                                                                types.FunctionResponse(
+                                                                    name=call.name,
+                                                                    id=call.id,
+                                                                    response={
+                                                                        "status": "blocked_by_military_gate",
+                                                                        "passed": False,
+                                                                        "instruction": reason
+                                                                    }
                                                                 )
-                                                            }
+                                                            ]
                                                         )
-                                                    ]
-                                                )
-                                            if not ptt.always_listen:
-                                                ptt.mute()
-                                            ptt.print_status()
+                                                    if not ptt.always_listen:
+                                                        ptt.mute()
+                                                    ptt.print_status()
+                                                    continue
 
-                                            # 2. 后台异步协程拉起派单任务，绝不阻塞 receive_loop
-                                            asyncio.create_task(run_dispatched_task(task_prompt, authorized=allow_mod, category=category))
+                                                metrics.dispatched_tasks_count += 1
+                                                logger.info(f"[门禁放行派单] 任务='{task_prompt}', 授权实操={allow_mod}, 类别={category}")
+                                                ptt.write_log(f"\033[1;32m[派单司令塔] 长官已口头确认，准予执行: {task_prompt} (实操权限: {allow_mod})\033[0m")
+
+                                                # 1. 毫秒级返回 ToolResponse，消除阻塞
+                                                async with ws_send_lock:
+                                                    await session.send_tool_response(
+                                                        function_responses=[
+                                                            types.FunctionResponse(
+                                                                name=call.name,
+                                                                id=call.id,
+                                                                response={
+                                                                    "status": "dispatched",
+                                                                    "authorized": allow_mod,
+                                                                    "message": (
+                                                                        f"任务【{task_prompt}】已成功分派至后台实施工程师执行（{'已授权实操' if allow_mod else '只读分析'}）。"
+                                                                        f"请立即用极其干练的一句话向长官回执（必须以'报告 长官！'开头）：'报告 长官！任务已派发给实施工程师，正在执行：{task_prompt[:35]}，请稍候。'，"
+                                                                        "并说明在此期间长官可以随时继续正常交谈。"
+                                                                    )
+                                                                }
+                                                            )
+                                                        ]
+                                                    )
+                                                if not ptt.always_listen:
+                                                    ptt.mute()
+                                                ptt.print_status()
+
+                                                # 2. 后台异步协程拉起派单任务，绝不阻塞 receive_loop
+                                                asyncio.create_task(run_dispatched_task(task_prompt, authorized=allow_mod, category=category))
+                        finally:
+                            if ai_subtitle_streaming:
+                                sys.stdout.write("\n")
+                                sys.stdout.flush()
+                                ai_subtitle_streaming = False
+                                ptt.is_streaming_subtitle = False
 
                     # 模式 A: IDE 状态与事件实时监听回调（通过单通道协调器统一排队）
                     async def on_ide_task_completed(task_name: str, summary: str, source: str = "ide"):
                         src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(ide_action=f"已完成: {task_name[:25]}", advisor_status="通报排队中")
-                        sys.stdout.write(f"\n\033[1;32m[{src_title} 状态感知] 实施工程师已完成任务: {task_name[:50]}\033[0m\n")
-                        sys.stdout.flush()
+                        ptt.write_log(f"\033[1;32m[{src_title} 状态感知] 实施工程师已完成任务: {task_name[:50]}\033[0m")
 
                         clean_task = sanitize_for_speech(task_name, max_chars=60)
                         clean_summary = sanitize_for_speech(summary, max_chars=420)
@@ -1308,9 +1329,11 @@ async def run_live_session(
                     async def on_ide_error_detected(action: str, error_snippet: str, source: str = "ide"):
                         src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(ide_action=f"异常: {action[:25]}", advisor_status="预警排队中")
-                        sys.stdout.write(f"\n\033[1;31m[{src_title} 异常预警] 实施工程师执行失败: {action}\033[0m\n")
-                        sys.stdout.write(f"\033[31m  -> 核心原因: {error_snippet}\033[0m\n")
-                        sys.stdout.flush()
+                        err_banner = (
+                            f"\033[1;31m[{src_title} 异常预警] 实施工程师执行失败: {action}\033[0m\n"
+                            f"\033[31m  -> 核心原因: {error_snippet}\033[0m"
+                        )
+                        ptt.write_log(err_banner)
 
                         clean_act = sanitize_for_speech(action, max_chars=30)
                         clean_err = sanitize_for_speech(error_snippet, max_chars=100)
@@ -1361,8 +1384,7 @@ async def run_live_session(
                     async def on_ide_user_input(req: str, source: str = "ide"):
                         src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(ide_action=f"新需求: {req[:25]}")
-                        sys.stdout.write(f"\n\033[1;34m[{src_title} 状态感知] 监测到长官发送了新需求: {req[:60]}...\033[0m\n")
-                        sys.stdout.flush()
+                        ptt.write_log(f"\033[1;34m[{src_title} 状态感知] 监测到长官发送了新需求: {req[:60]}...\033[0m")
                         try:
                             clean_req = sanitize_for_speech(req, max_chars=80)
                             c = types.Content(
@@ -1430,9 +1452,7 @@ async def run_live_session(
                 if shutdown_event.is_set():
                     break
                 metrics.reconnect_count += 1
-                logger.warning(f"[网络会话波动重连] 错误={err}, 指标={metrics.summary()}")
-                sys.stdout.write(f"\n\n\033[1;33m[Live API 保持] ⚠️ 会话连接波动 ({err})，正在自动恢复重连... (第{metrics.reconnect_count}次, 1.5秒后)\033[0m\n\n")
-                sys.stdout.flush()
+                ptt.write_log(f"\033[1;33m[Live API 保持] ⚠️ 会话连接波动 ({err})，正在自动恢复重连... (第{metrics.reconnect_count}次, 1.5秒后)\033[0m")
                 while not audio_in_queue.empty():
                     try:
                         audio_in_queue.get_nowait()

@@ -57,8 +57,56 @@ def test_global_hotkey_setup():
             pass
     print("✓ [P1-2 验证通过] 全局呼叫热键验证 100% 达标：跨软件对讲架构就绪")
 
+def test_ptt_subtitle_lock_and_logging():
+    import io
+    import sys
+    ptt = PTTController(always_listen=False)
+
+    # 1. 正常状态下 print_status 会输出 HUD 状态行
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        sys.stdout = buf
+        ptt.print_status()
+    finally:
+        sys.stdout = old_stdout
+    out = buf.getvalue()
+    assert "[🔇 静音]" in out
+    assert "[🛠️]" in out
+
+    # 2. 当正在流式输出字幕时，is_streaming_subtitle 锁死 HUD 刷新，严禁冲刷字幕
+    ptt.is_streaming_subtitle = True
+    buf_locked = io.StringIO()
+    try:
+        sys.stdout = buf_locked
+        ptt.print_status()
+        ptt.update_dashboard(ide_action="新动作")
+        ptt.mute()
+        ptt.unmute()
+    finally:
+        sys.stdout = old_stdout
+    assert buf_locked.getvalue() == "", "流式字幕输出期间严禁任何 HUD 状态刷新冲刷终端屏幕"
+
+    # 3. 验证 write_log 方法先清除底行再输出日志
+    ptt.is_streaming_subtitle = False
+    buf_log = io.StringIO()
+    try:
+        sys.stdout = buf_log
+        ptt.mute()
+        buf_log.truncate(0)
+        buf_log.seek(0)
+        ptt.write_log("测试事件日志")
+    finally:
+        sys.stdout = old_stdout
+    log_out = buf_log.getvalue()
+    assert "\r\033[K测试事件日志\n" in log_out
+    assert "[🔇 静音]" in log_out
+    print("✓ [P1-5 验证通过] 字幕流式锁与无残留事件日志验证 100% 达标：杜绝终端字幕折行错乱与重叠伪行")
+
 if __name__ == "__main__":
     test_tool_declarations()
     test_noise_gate_characteristics()
     test_global_hotkey_setup()
+    test_ptt_subtitle_lock_and_logging()
     print("\n★ 全部 P1 关键特性自动化集成测试通过！")
+
