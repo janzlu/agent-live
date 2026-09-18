@@ -13,6 +13,8 @@ Features:
 
 import os
 import sys
+import re
+import unicodedata
 import asyncio
 import argparse
 from pathlib import Path
@@ -160,6 +162,18 @@ ANTIGRAVITY_TOOLS = [
 ]
 
 
+def get_display_width(text: str) -> int:
+    """计算字符串在终端中的物理显示列宽（中文字符/全角/宽Emoji计2列，ASCII计1列，剔除ANSI颜色代码）"""
+    clean_text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    width = 0
+    for ch in clean_text:
+        if unicodedata.east_asian_width(ch) in ('F', 'W'):
+            width += 2
+        else:
+            width += 1
+    return width
+
+
 class PTTController:
     """Push-to-Talk (按键开麦/静音切换) 与战况指示看板控制器"""
     def __init__(self, always_listen: bool = False, on_unmute=None):
@@ -214,18 +228,21 @@ class PTTController:
         vol_meter = self._render_volume_bar(self.last_volume, self.is_voice_active)
         if self.always_listen:
             ptt_str = "\033[1;32m[🎙️ 全双工]\033[0m"
-            left_len = 12
         elif self.is_active:
             ptt_str = f"\033[1;32m[🎙️ 开麦 {vol_meter}]\033[0m \033[32m(说完按 Ctrl+Space)\033[0m"
-            left_len = 38
         else:
             ptt_str = f"\033[1;33m[🔇 静音]\033[0m \033[33m(Ctrl+Space 对讲)\033[0m"
-            left_len = 28
 
-        avail = max(6, cols - left_len - 9)
+        left_width = get_display_width(ptt_str)
+        # 固定开销: " | " 占 3 列，"[🛠️] " 占 6 列，预留安全间隙 2 列防止触碰终端物理右边界
+        fixed_overhead = left_width + 3 + 6 + 2
+        avail = max(4, cols - fixed_overhead)
+
         action = self.current_ide_action
-        if len(action) > avail:
-            action = action[:max(3, avail - 2)] + ".."
+        if get_display_width(action) > avail:
+            while get_display_width(action) > max(2, avail - 2) and len(action) > 1:
+                action = action[:-1]
+            action = action + ".."
         ide_str = f"\033[1;36m[🛠️]\033[0m {action}"
 
         sys.stdout.write(f"\r\033[K{ptt_str} | {ide_str}")

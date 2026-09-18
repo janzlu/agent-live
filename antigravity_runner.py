@@ -42,8 +42,10 @@ class AccountPoolManager:
     def _load_state(self) -> dict:
         if self.state_file.exists():
             try:
-                with open(self.state_file, "r") as f:
-                    return json.load(f)
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
             except Exception:
                 pass
         return {}
@@ -51,8 +53,10 @@ class AccountPoolManager:
     def _save_state(self, state: dict):
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2)
+            tmp_file = self.state_file.with_suffix(".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+            tmp_file.replace(self.state_file)
         except Exception:
             pass
 
