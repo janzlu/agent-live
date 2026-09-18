@@ -268,11 +268,42 @@ def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop, target_ide: Option
                     front_app = NSWorkspace.sharedWorkspace().frontmostApplication()
                     app_name = (front_app.localizedName() or "").lower()
                     bundle_id = (front_app.bundleIdentifier() or "").lower()
-                    # 前台明显在另一个 IDE 时，本实例不拦截开麦
-                    if target_ide == "cursor" and ("antigravity" in app_name or "antigravity" in bundle_id):
-                        return
-                    if target_ide == "antigravity" and ("cursor" in app_name or "cursor" in bundle_id):
-                        return
+
+                    is_in_antigravity = "antigravity" in app_name or "antigravity" in bundle_id
+                    is_in_cursor = "cursor" in app_name or "cursor" in bundle_id
+
+                    active_ide_file = os.path.expanduser("~/.agent_live_active_ide")
+
+                    # 1. 若当前前台正处于某个 IDE，更新最后活跃 IDE 记录，并仅放行对应 IDE
+                    if is_in_antigravity:
+                        try:
+                            with open(active_ide_file, "w", encoding="utf-8") as f:
+                                f.write("antigravity")
+                        except Exception:
+                            pass
+                        if target_ide != "antigravity":
+                            return
+                    elif is_in_cursor:
+                        try:
+                            with open(active_ide_file, "w", encoding="utf-8") as f:
+                                f.write("cursor")
+                        except Exception:
+                            pass
+                        if target_ide != "cursor":
+                            return
+                    else:
+                        # 2. 当前前台既非 Cursor 亦非 Antigravity (如 Chrome/微信/访达/终端等后台环境)
+                        # 仅让最近一次活跃的 IDE 专属副驾响应开麦，绝对杜绝双实例同时响应开麦！
+                        last_active = None
+                        if os.path.exists(active_ide_file):
+                            try:
+                                with open(active_ide_file, "r", encoding="utf-8") as f:
+                                    last_active = f.read().strip().lower()
+                            except Exception:
+                                pass
+                        if last_active in ("cursor", "antigravity"):
+                            if target_ide != last_active:
+                                return
                 except Exception:
                     pass
             loop.call_soon_threadsafe(ptt.toggle)
