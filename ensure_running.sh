@@ -13,12 +13,14 @@ TARGET_IDE=""
 WORKSPACE=""
 DO_RESTART=false
 DO_STOP=false
+EXPLICIT_IDE=""
 PASSTHROUGH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --ide)
             TARGET_IDE="$2"
+            EXPLICIT_IDE="$2"
             shift 2
             ;;
         --workspace)
@@ -63,17 +65,19 @@ fi
 
 # 2. 处理停止/重启逻辑
 if [ "$DO_STOP" = true ] || [ "$DO_RESTART" = true ]; then
-    echo "[Ensure] 正在停止目标宿主 (${TARGET_IDE}) 的运行实例..."
-    pkill -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" 2>/dev/null || true
-    pkill -f "start.sh.*--ide ${TARGET_IDE}" 2>/dev/null || true
-    if [ "$TARGET_IDE" == "all" ]; then
-        pkill -f "python.*live_sidecar.py" 2>/dev/null || true
-        pkill -f "start.sh" 2>/dev/null || true
+    echo "[Ensure] 正在安全停止运行中的副驾会话..."
+    if [ "$TARGET_IDE" == "all" ] || [ -z "$EXPLICIT_IDE" ]; then
+        pkill -9 -f "python.*live_sidecar.py" 2>/dev/null || true
+        pkill -9 -f "start.sh" 2>/dev/null || true
         rm -f ~/.agent_live_audio.lock
+        echo "[Ensure] ✓ 已清理全部历史会话进程与音频锁。"
+    else
+        pkill -9 -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" 2>/dev/null || true
+        pkill -9 -f "start.sh.*--ide ${TARGET_IDE}" 2>/dev/null || true
+        echo "[Ensure] ✓ 已停止 [${TARGET_IDE^^}] 专属会话。"
     fi
     sleep 0.5
     if [ "$DO_STOP" = true ]; then
-        echo "[Ensure] ✓ 目标实例已成功停止。"
         exit 0
     fi
 fi
