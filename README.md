@@ -166,8 +166,9 @@ agent-live/
 ├── .gitignore                # 严密过滤规则 (严格隔离 .env 与虚拟环境)
 ├── README.md                 # 完整实操与架构说明文档
 ├── requirements.txt          # Python 核心依赖清单
-├── start.sh                  # 一键环境自检、依赖自愈与启动脚本
-├── ensure_running.sh         # 跨 IDE 智能感知与唤醒器 (自动在 Cursor/Antigravity 中打开终端)
+├── start.sh                  # 一键环境自检、依赖自愈与启动脚本 (自动感知当前 IDE 通道)
+├── restart.sh                # 语音会话重启清理管理器 (一键全量或定向安全重启)
+├── ensure_running.sh         # 跨 IDE 智能感知与看守器 (支持 --ide, --restart, --stop)
 ├── live_sidecar.py           # 核心引擎: Gemini 3.8 Live 双向多模态 WebSocket 管道、PTT调度与强占切断
 ├── speech_coordinator.py     # 单通道排队调度器 (优先级排序、瞬态解说自动去重与过时丢弃)
 ├── audio_monitor.py          # 系统媒体音频活动检测 (pmset/coreaudiod) 与跨进程播报互斥租约

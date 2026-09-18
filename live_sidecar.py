@@ -69,7 +69,13 @@ def detect_current_ide() -> str:
         or "CURSOR_WORKSPACE_LABEL" in env
     ):
         return "cursor"
-    if "ANTIGRAVITY_TRAJECTORY_ID" in env:
+    if "ANTIGRAVITY_TRAJECTORY_ID" in env or "ANTIGRAVITY_CLI_ALIAS" in env:
+        return "antigravity"
+
+    bundle_id = env.get("__CFBundleIdentifier", "").lower()
+    if "cursor" in bundle_id:
+        return "cursor"
+    if "antigravity" in bundle_id:
         return "antigravity"
 
     code_cache = env.get("VSCODE_CODE_CACHE_PATH", "")
@@ -233,15 +239,29 @@ class NoiseGate:
             return False
 
 
-def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop):
+def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop, target_ide: Optional[str] = None):
     """
     配置系统级全局呼叫热键 (支持跨软件/后台随时对讲呼叫)
     默认绑定: <ctrl>+<space> 以及备选 <cmd>+<shift>+<space>
+    配合 target_ide 识别当前前台活跃窗口，精准路由热键至对应 IDE，杜绝跨宿主误触发
     """
     try:
         from pynput import keyboard
 
         def on_hotkey_triggered():
+            if target_ide in ("cursor", "antigravity"):
+                try:
+                    from AppKit import NSWorkspace
+                    front_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+                    app_name = (front_app.localizedName() or "").lower()
+                    bundle_id = (front_app.bundleIdentifier() or "").lower()
+                    # 前台明显在另一个 IDE 时，本实例不拦截开麦
+                    if target_ide == "cursor" and ("antigravity" in app_name or "antigravity" in bundle_id):
+                        return
+                    if target_ide == "antigravity" and ("cursor" in app_name or "cursor" in bundle_id):
+                        return
+                except Exception:
+                    pass
             loop.call_soon_threadsafe(ptt.toggle)
 
         hotkey_map = {
@@ -252,7 +272,7 @@ def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop):
         listener = keyboard.GlobalHotKeys(hotkey_map)
         listener.daemon = True
         listener.start()
-        print(" ★ [全局呼叫热键] ✓ 已激活！在任何软件/窗口按 Ctrl+Space 或 Cmd+Shift+Space 即可随时对讲！")
+        print(" ★ [全局呼叫热键] ✓ 已激活！在对应 IDE 或任意窗口按 Ctrl+Space 即可随时对讲！")
         return listener
     except Exception as e:
         print(f" [全局热键说明] 系统全局按键监听未授权或受限 ({e})，已平滑降级为终端前台空格/回车开麦模式。")
@@ -617,8 +637,17 @@ async def run_live_session(
 
     ptt = PTTController(always_listen=always_listen, on_unmute=on_unmute_callback)
 
-    # 启动系统级全局呼叫热键 (支持跨软件/后台随时对讲)
-    global_hotkey = setup_global_hotkey(ptt, asyncio.get_running_loop())
+    # 启动系统级全局呼叫热键 (支持跨软件/后台随时对讲，智能过滤非目标 IDE)
+    resolved_ide = ide_target if ide_target and ide_target != "auto" else detect_current_ide()
+    global_hotkey = setup_global_hotkey(ptt, asyncio.get_running_loop(), target_ide=resolved_ide)
+
+    # 动态更新终端 Tab 标题栏，一眼区分不同 IDE 专属终端会话
+    try:
+        ws_name = Path(workspace_dir).name
+        sys.stdout.write(f"\033]0;Agent Live [{resolved_ide.upper()}] - {ws_name}\007")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
     # 本地自适应音频能量门限降噪器 (Adaptive RMS Noise Gate with Hangover)
     noise_gate = NoiseGate(
@@ -1412,10 +1441,20 @@ def main():
     if not target_workspace or not os.path.isdir(target_workspace):
         target_workspace = detect_active_workspace(ide_type=args.ide)
 
+    target_ide = args.ide if args.ide != "auto" else detect_current_ide()
     target_path = Path(target_workspace).resolve()
     project_meta = get_project_grounding_info(str(target_path))
+
+    # 动态设定终端选项卡标签，方便在 IDE 终端列表中精准区分会话
+    try:
+        sys.stdout.write(f"\033]0;Agent Live [{target_ide.upper()}] - {target_path.name}\007")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
     sys.stdout.write("\n" + "="*65 + "\n")
-    sys.stdout.write(f" ★ [动态工作区锁定] 已锚定当前活跃工程: \033[1;32m{target_path.name}\033[0m\n")
+    sys.stdout.write(f" ★ [IDE 宿主模式] 专属独立通道: \033[1;36m{target_ide.upper()}\033[0m\n")
+    sys.stdout.write(f" ★ [动态工作区锁定] 已锚定当前工程: \033[1;32m{target_path.name}\033[0m\n")
     sys.stdout.write(f" ★ 物理路径: {target_path}\n")
     sys.stdout.write(f" ★ 业务基线: {project_meta['summary'][:65]}\n")
     if project_meta['modules']:

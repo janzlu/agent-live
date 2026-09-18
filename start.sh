@@ -39,16 +39,29 @@ echo "------------------------------------------------------------------"
 echo " ★ 正在启动实时双工语音伴飞引擎... (按 Ctrl+C 彻底退出)"
 echo "------------------------------------------------------------------"
 
+# 捕获退出信号，确保退出或杀进程时自愈循环能彻底终止
+trap "echo -e '\n[Sidecar] 收到终止信号，会话安全退出。'; exit 0" SIGINT SIGTERM
+
+# 智能补全宿主通道参数（若命令行未显式传入 --ide）
+EXTRA_ARGS=()
+if [[ "$*" != *"--ide"* ]]; then
+    if [ -n "$CURSOR_AGENT" ] || [ -n "$CURSOR_REQUEST_ID" ] || [ -n "$AGENT_TRANSCRIPTS" ] || [ -n "$CURSOR_WORKSPACE_LABEL" ]; then
+        EXTRA_ARGS+=("--ide" "cursor")
+    elif [ -n "$ANTIGRAVITY_TRAJECTORY_ID" ] || [ -n "$ANTIGRAVITY_CLI_ALIAS" ]; then
+        EXTRA_ARGS+=("--ide" "antigravity")
+    fi
+fi
+
 set +e
 while true; do
     if [ -f ".env" ]; then
         export $(grep -v '^#' .env | xargs)
     fi
-    python live_sidecar.py "$@"
+    python live_sidecar.py "${EXTRA_ARGS[@]}" "$@"
     EXIT_CODE=$?
-    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 130 ]; then
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 130 ] || [ $EXIT_CODE -eq 143 ]; then
         echo ""
-        echo "[Sidecar] 长官主动中止，会话已安全关闭。"
+        echo "[Sidecar] 长官主动中止或收到退出信号，会话已安全关闭。"
         break
     else
         echo ""
