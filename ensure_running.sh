@@ -66,20 +66,15 @@ fi
 # 2. 处理停止/重启逻辑
 if [ "$DO_STOP" = true ] || [ "$DO_RESTART" = true ]; then
     echo "[Ensure] 正在安全停止运行中的副驾会话..."
-    if [ "$TARGET_IDE" == "all" ] || [ -z "$EXPLICIT_IDE" ]; then
-        pkill -9 -f "python.*live_sidecar.py" 2>/dev/null || true
-        pkill -9 -f "start.sh" 2>/dev/null || true
-        rm -f ~/.agent_live_audio.lock
-        echo "[Ensure] ✓ 已清理全部历史会话进程与音频锁。"
-    else
-        pkill -9 -f "python.*live_sidecar.py.*--ide ${TARGET_IDE}" 2>/dev/null || true
-        pkill -9 -f "start.sh.*--ide ${TARGET_IDE}" 2>/dev/null || true
-        echo "[Ensure] ✓ 已停止 [${TARGET_IDE^^}] 专属会话。"
-    fi
-    sleep 0.5
     if [ "$DO_STOP" = true ]; then
+        # 显式关闭：写 STOP 旗标，禁止看门狗自动拉起
+        "$DIR/watchdog.sh" --stop
         exit 0
     fi
+    # 重启：先 stop 再清旗标由后续启动逻辑拉起
+    "$DIR/watchdog.sh" --stop >/dev/null 2>&1 || true
+    rm -f "$DIR/.run/STOP"
+    sleep 0.5
 fi
 
 # 3. 幂等性检查：判断该 IDE 专属实例是否已在运行

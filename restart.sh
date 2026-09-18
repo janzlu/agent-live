@@ -33,8 +33,8 @@ pkill -9 -f "python.*live_sidecar.py" 2>/dev/null || true
 sleep 1
 
 # 2. 清理音频仲裁锁与残留状态
-echo "[2/3] 正在释放跨进程音频锁..."
-rm -f ~/.agent_live_audio.lock
+echo "[2/3] 正在释放跨进程音频锁与 STOP 旗标..."
+rm -f ~/.agent_live_audio.lock "$DIR/.run/STOP"* 2>/dev/null || true
 
 # 3. 按目标重新拉起
 echo "[3/3] 正在准备重新拉起..."

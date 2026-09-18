@@ -56,6 +56,19 @@ CHANNELS = 1
 CHUNK_SIZE = 1024
 
 
+def set_explicit_stop_flag(ide: str):
+    """写入显式停止旗标文件，通知外部守护进程和自愈循环安全退出，禁止重启"""
+    for p in [
+        os.path.expanduser(f"~/.agent_live_stop_{ide}"),
+        os.path.join(os.path.dirname(__file__), ".run", "STOP"),
+    ]:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            Path(p).touch()
+        except Exception:
+            pass
+
+
 def detect_current_ide() -> str:
     """
     根据当前执行终端的环境变量与父进程特征，自动推断所属的 IDE（Cursor vs Antigravity）。
@@ -339,6 +352,22 @@ ANTIGRAVITY_TOOLS = [
                     },
                     "required": ["task_description"]
                 }
+            },
+            {
+                "name": "shutdown_sidecar",
+                "description": (
+                    "【明确指令关闭副驾】当长官口头下达明确的退出指令（如'关闭副驾'、'退出伴飞'、'结束会话'、'关闭系统'、'退出语音'）时调用此工具安全退出语音伴飞。"
+                    "严格注意：仅在长官明确要求关闭或退出时调用，日常任务讨论绝不擅自调用。"
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "reason": {
+                            "type": "STRING",
+                            "description": "长官下达关闭指令的具体口令或原因"
+                        }
+                    }
+                }
             }
         ]
     }
@@ -445,8 +474,8 @@ class PTTController:
         return f"\033[1;32m🗣️{meter}\033[0m"
 
 
-async def keyboard_listener(ptt: PTTController, shutdown_event: asyncio.Event):
-    """终端按键监听任务 (空格/回车切换静音与开麦)"""
+async def keyboard_listener(ptt: PTTController, shutdown_event: asyncio.Event, resolved_ide: str = "antigravity"):
+    """终端按键监听任务 (空格/回车切换静音与开麦，q/Ctrl+C 明确退出)"""
     if ptt.always_listen or not sys.stdin.isatty():
         return
 
@@ -463,7 +492,8 @@ async def keyboard_listener(ptt: PTTController, shutdown_event: asyncio.Event):
             char = await loop.run_in_executor(None, sys.stdin.read, 1)
             if char in (' ', '\r', '\n', '\x00'):
                 ptt.toggle()
-            elif char == '\x03':  # Ctrl+C
+            elif char in ('\x03', 'q', 'Q'):  # Ctrl+C 或长官按 q 键明确退出
+                set_explicit_stop_flag(resolved_ide)
                 shutdown_event.set()
                 break
     except Exception:
@@ -796,7 +826,7 @@ async def run_live_session(
             await asyncio.to_thread(speaker_stream.write, batch)
 
     speaker_task = asyncio.create_task(play_audio_loop())
-    keyboard_task = asyncio.create_task(keyboard_listener(ptt, shutdown_event))
+    keyboard_task = asyncio.create_task(keyboard_listener(ptt, shutdown_event, resolved_ide=resolved_ide))
 
     ws_send_lock = asyncio.Lock()
     is_first_connect = True
@@ -1158,6 +1188,25 @@ async def run_live_session(
                                             if not ptt.always_listen:
                                                 ptt.mute()
                                             ptt.print_status()
+
+                                        elif call.name in ("shutdown_sidecar", "stop_voice_copilot"):
+                                            sys.stdout.write(f"\n\n\033[1;31m[明确关闭指令] 收到长官明确口令指示，正在退出语音副驾...\033[0m\n")
+                                            sys.stdout.flush()
+                                            async with ws_send_lock:
+                                                await session.send_tool_response(
+                                                    function_responses=[
+                                                        types.FunctionResponse(
+                                                            name=call.name,
+                                                            id=call.id,
+                                                            response={"status": "shutting_down", "message": "遵命长官，语音副驾已为您关闭，随时待命！"}
+                                                        )
+                                                    ]
+                                                )
+                                            # 写入明确停止标记，告知守护脚本停止自愈重启
+                                            set_explicit_stop_flag(resolved_ide)
+                                            await asyncio.sleep(0.8)
+                                            shutdown_event.set()
+                                            break
 
                                         elif call.name in ("dispatch_task_to_engineer", "execute_antigravity_task"):
                                             task_prompt = call.args.get("task_prompt") or call.args.get("task_description", "")

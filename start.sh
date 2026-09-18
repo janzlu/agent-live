@@ -36,11 +36,34 @@ echo "[热键提醒] 若首次在 macOS 运行，请确保终端已获得『系�
 
 # 4. 运行自愈启动循环
 echo "------------------------------------------------------------------"
-echo " ★ 正在启动实时双工语音伴飞引擎... (按 Ctrl+C 彻底退出)"
+echo " ★ 正在启动实时双工语音伴飞引擎..."
+echo " ★ 异常退出将自动重启；显式关闭请执行: ./stop.sh 或 ./watchdog.sh --stop"
 echo "------------------------------------------------------------------"
 
-# 捕获退出信号，确保退出或杀进程时自愈循环能彻底终止
-trap "echo -e '\n[Sidecar] 收到终止信号，会话安全退出。'; exit 0" SIGINT SIGTERM
+RUN_DIR="$DIR/.run"
+mkdir -p "$RUN_DIR"
+STOP_FLAG="$RUN_DIR/STOP"
+
+# 显式启动时清理历史残留 STOP 旗标，确保全新启动
+rm -f "$STOP_FLAG" "$RUN_DIR/STOP_"* 2>/dev/null || true
+
+# 显式关闭处理：终端前台 Ctrl+C 直接写入 STOP 旗标并退出；外部信号仅在有 STOP 旗标时正常退出
+_on_sigint() {
+    echo -e "\n[Sidecar] 收到长官终端中断指令 (Ctrl+C)，已记录 STOP 旗标并安全退出。"
+    touch "$STOP_FLAG" 2>/dev/null || true
+    exit 0
+}
+trap _on_sigint SIGINT
+
+_on_sigterm() {
+    if [ -f "$STOP_FLAG" ]; then
+        echo -e "\n[Sidecar] 收到显式关闭指令 (SIGTERM)，会话安全退出。"
+        exit 0
+    fi
+    echo -e "\n[Sidecar] 收到意外终止信号 (SIGTERM)，交由守护机制自愈重启..."
+    exit 99
+}
+trap _on_sigterm SIGTERM
 
 # 智能补全宿主通道参数（若命令行未显式传入 --ide）
 EXTRA_ARGS=()
@@ -54,18 +77,29 @@ fi
 
 set +e
 while true; do
+    if [ -f "$STOP_FLAG" ]; then
+        echo "[Sidecar] 检测到 STOP 旗标，停止自愈循环。"
+        break
+    fi
     if [ -f ".env" ]; then
         export $(grep -v '^#' .env | xargs)
     fi
     python live_sidecar.py "${EXTRA_ARGS[@]}" "$@"
     EXIT_CODE=$?
-    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 130 ] || [ $EXIT_CODE -eq 143 ]; then
+    if [ -f "$STOP_FLAG" ]; then
         echo ""
-        echo "[Sidecar] 长官主动中止或收到退出信号，会话已安全关闭。"
+        echo "[Sidecar] 显式关闭完成，不再自动重启。"
+        break
+    fi
+    # 0 / 130(Ctrl+C) / 143(SIGTERM) 仅在有 STOP 旗标时视为主动退出；否则继续自愈
+    if [ $EXIT_CODE -eq 0 ] && [ -f "$STOP_FLAG" ]; then
+        echo ""
+        echo "[Sidecar] 长官主动中止，会话已安全关闭。"
         break
     else
         echo ""
         echo "[Sidecar] ⚠️ 进程异常退出 (code: $EXIT_CODE)，2秒后自动尝试自愈重启..."
+        echo "[Sidecar] （若要彻底关闭请执行 ./stop.sh）"
         sleep 2
     fi
 done
