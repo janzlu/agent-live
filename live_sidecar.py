@@ -209,25 +209,35 @@ class PTTController:
             self.print_status()
 
     def print_status(self):
+        import shutil
+        cols = max(40, shutil.get_terminal_size((80, 24)).columns)
         vol_meter = self._render_volume_bar(self.last_volume, self.is_voice_active)
         if self.always_listen:
-            ptt_str = "\033[1;32m[🎙️ 全双工常开]\033[0m"
+            ptt_str = "\033[1;32m[🎙️ 全双工]\033[0m"
+            left_len = 12
         elif self.is_active:
-            ptt_str = f"\033[1;32m[🎙️ 对讲开麦中 {vol_meter}]\033[0m \033[32m(说话中... 说完按 Ctrl+Space 确认发送)\033[0m"
+            ptt_str = f"\033[1;32m[🎙️ 开麦 {vol_meter}]\033[0m \033[32m(说完按 Ctrl+Space)\033[0m"
+            left_len = 38
         else:
-            ptt_str = f"\033[1;33m[🔇 对讲静音]\033[0m \033[33m(按 Ctrl+Space 开麦对讲)\033[0m"
+            ptt_str = f"\033[1;33m[🔇 静音]\033[0m \033[33m(Ctrl+Space 对讲)\033[0m"
+            left_len = 28
 
-        ide_str = f"\033[1;36m[🛠️ 实施工程师]\033[0m {self.current_ide_action[:40]}"
+        avail = max(6, cols - left_len - 9)
+        action = self.current_ide_action
+        if len(action) > avail:
+            action = action[:max(3, avail - 2)] + ".."
+        ide_str = f"\033[1;36m[🛠️]\033[0m {action}"
+
         sys.stdout.write(f"\r\033[K{ptt_str} | {ide_str}")
         sys.stdout.flush()
 
     def _render_volume_bar(self, rms: float, is_voice: bool) -> str:
         bars = [" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
         if not is_voice or rms <= 0.001:
-            return "\033[0;37m🤫 ---\033[0m"
+            return "\033[0;37m🤫---\033[0m"
         level = min(len(bars) - 1, max(1, int(np.sqrt(max(0.0, rms)) * 14)))
-        meter = bars[level] * (level + 1)
-        return f"\033[1;32m🗣️ {meter}\033[0m"
+        meter = bars[level] * min(3, level + 1)
+        return f"\033[1;32m🗣️{meter}\033[0m"
 
 
 async def keyboard_listener(ptt: PTTController, shutdown_event: asyncio.Event):
@@ -368,6 +378,10 @@ async def run_live_session(
     audio_in_queue = asyncio.Queue()
     audio_out_queue = asyncio.Queue()
     is_ai_speaking = False
+
+    # 禁用终端自动换行 (DECAWM)，从终端底层彻底杜绝折行与刷屏
+    sys.stdout.write("\033[?7l")
+    sys.stdout.flush()
 
     def on_unmute_callback():
         nonlocal is_ai_speaking
@@ -953,6 +967,8 @@ async def run_live_session(
                 await asyncio.sleep(1.5)
 
     finally:
+        sys.stdout.write("\033[?7h\n")
+        sys.stdout.flush()
         shutdown_event.set()
         if global_hotkey:
             try:
