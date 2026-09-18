@@ -83,11 +83,12 @@ def setup_global_hotkey(ptt, loop: asyncio.AbstractEventLoop):
         hotkey_map = {
             '<ctrl>+<space>': on_hotkey_triggered,
             '<cmd>+<shift>+<space>': on_hotkey_triggered,
+            '<ctrl>+<alt>+<space>': on_hotkey_triggered,
         }
         listener = keyboard.GlobalHotKeys(hotkey_map)
         listener.daemon = True
         listener.start()
-        print(" ★ [全局呼叫热键] ✓ 已激活！在任何软件/窗口按 Ctrl+Space 即可随时对讲！")
+        print(" ★ [全局呼叫热键] ✓ 已激活！在任何软件/窗口按 Ctrl+Space 或 Cmd+Shift+Space 即可随时对讲！")
         return listener
     except Exception as e:
         print(f" [全局热键说明] 系统全局按键监听未授权或受限 ({e})，已平滑降级为终端前台空格/回车开麦模式。")
@@ -186,6 +187,8 @@ class PTTController:
         self.current_ide_action = "等待长官下达任务指令"
         self.current_advisor_status = "伴飞就绪"
         self.last_print_time = 0.0
+        self.has_spoken = False
+        self.last_voice_time = 0.0
 
     def update_dashboard(self, ide_action: Optional[str] = None, advisor_status: Optional[str] = None):
         if ide_action is not None:
@@ -209,6 +212,7 @@ class PTTController:
             self.is_active = False
             self.just_muted = True
             self.is_voice_active = False
+            self.has_spoken = False
             self.print_status()
 
     def unmute(self):
@@ -218,6 +222,9 @@ class PTTController:
             self.is_active = True
             self.just_muted = False
             self.is_voice_active = False
+            self.has_spoken = False
+            import time
+            self.last_voice_time = time.time()
             if self.on_unmute:
                 self.on_unmute()
             self.print_status()
@@ -229,7 +236,7 @@ class PTTController:
         if self.always_listen:
             ptt_str = "\033[1;32m[🎙️ 全双工]\033[0m"
         elif self.is_active:
-            ptt_str = f"\033[1;32m[🎙️ 开麦 {vol_meter}]\033[0m \033[32m(说完按 Ctrl+Space)\033[0m"
+            ptt_str = f"\033[1;32m[🎙️ 开麦 {vol_meter}]\033[0m \033[32m(请说话,停顿秒级回复)\033[0m"
         else:
             ptt_str = f"\033[1;33m[🔇 静音]\033[0m \033[33m(Ctrl+Space 对讲)\033[0m"
 
@@ -273,7 +280,7 @@ async def keyboard_listener(ptt: PTTController, shutdown_event: asyncio.Event):
         tty.setcbreak(fd)
         while not shutdown_event.is_set():
             char = await loop.run_in_executor(None, sys.stdin.read, 1)
-            if char in (' ', '\r', '\n'):
+            if char in (' ', '\r', '\n', '\x00'):
                 ptt.toggle()
             elif char == '\x03':  # Ctrl+C
                 shutdown_event.set()
@@ -335,11 +342,11 @@ async def run_live_session(
         response_modalities=["AUDIO"],
         # 禁用非必要思考延迟，实现毫秒级快速响应
         thinking_config=types.ThinkingConfig(thinking_budget=0),
-        # 智能宽容断句检测 (VAD)：默认留出 1500ms（或指定延时）充裕停顿与思考时间，LOW 灵敏度防抢话
+        # 智能实时断句检测 (VAD)：灵敏捕捉停顿，结合 client 端智能闭麦实现毫秒级快速响应
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                silence_duration_ms=max(800, vad_silence_ms)
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                silence_duration_ms=600
             )
         ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
@@ -418,7 +425,7 @@ async def run_live_session(
 
     # 本地轻量级音频能量门限降噪器 (RMS Noise Gate with Hangover)
     noise_gate = NoiseGate(
-        threshold=float(os.getenv("NOISE_GATE_THRESHOLD", "260.0")),
+        threshold=float(os.getenv("NOISE_GATE_THRESHOLD", "90.0")),
         hangover_ms=350,
         frame_duration_ms=20
     )
@@ -438,8 +445,14 @@ async def run_live_session(
             ptt.is_voice_active = is_voice
             samples = indata.astype(np.float32) / 32768.0
             ptt.last_volume = float(np.sqrt(np.mean(samples**2)))
-            if is_voice:
+            
+            # PTT 开麦模式下长官已明确按键开麦授权采音，无损推入队列；全双工模式下通过门限推流
+            if not ptt.always_listen or is_voice:
                 audio_in_queue.put_nowait(indata.copy())
+
+            if is_voice:
+                ptt.has_spoken = True
+                ptt.last_voice_time = now
 
             # 实时动态平滑刷新战况看板能量柱 (每 80ms 刷新一次，丝滑跳动)
             if now - ptt.last_print_time >= 0.08:
@@ -559,7 +572,14 @@ async def run_live_session(
                                 callback=mic_callback
                             ):
                                 while not shutdown_event.is_set():
-                                    # 当用户按键闭麦时，毫秒级倾泻发送队列里残留的尾音包，并立即发送结束信号通知服务端推理！
+                                    # 智能断句闭麦：若长官在对讲中已开嗓说完话且停顿超过 800ms，自动触发闭麦并发送 audio_stream_end 通知 AI 秒级回复
+                                    import time
+                                    now = time.time()
+                                    if not ptt.always_listen and ptt.is_active and ptt.has_spoken:
+                                        if now - ptt.last_voice_time >= 0.8:
+                                            ptt.mute()
+
+                                    # 当用户按键闭麦或智能断句闭麦时，毫秒级倾泻发送队列里残留的尾音包，并立即发送结束信号通知服务端推理！
                                     if ptt.just_muted:
                                         ptt.just_muted = False
                                         while not audio_in_queue.empty():
@@ -684,16 +704,9 @@ async def run_live_session(
                                             # 长官处于静音状态，此打断属于网络残包或回声误触发，坚决忽略，继续完整播放 AI 语音！
                                             pass
 
-                                    # 2. 话语权守护：在手动确认模式下，长官开麦期间拥有绝对话语权，绝不被服务端提前生成的 token 掐断！
-                                    if not manual_confirm:
-                                        if sc.model_turn and ptt.is_active and not ptt.is_voice_active and not ptt.always_listen:
-                                            ptt.mute()
-                                            ptt.just_muted = False
-                                            while not audio_in_queue.empty():
-                                                try:
-                                                    audio_in_queue.get_nowait()
-                                                except asyncio.QueueEmpty:
-                                                    break
+                                    # 2. 话语权守护：长官开麦后若 AI 开始回复，自动切换为闭麦倾听模式，彻底杜绝外放回音并立即播放！
+                                    if sc.model_turn and ptt.is_active and not ptt.always_listen:
+                                        ptt.mute()
 
                                     # 3. 实时打印开发者语音转写
                                     if sc.input_transcription and sc.input_transcription.text:
@@ -714,9 +727,8 @@ async def run_live_session(
 
                                     # 5. 处理语音音频数据包
                                     if sc.model_turn:
-                                        # 最高优先级对讲强占：长官讲话期间，任何下行语音包坚决丢弃，杜绝外放声音干扰长官！
-                                        if ptt.is_active and not ptt.always_listen:
-                                            continue
+                                        if not ptt.always_listen and ptt.is_active:
+                                            ptt.mute()
                                         is_ai_speaking = True
                                         for part in sc.model_turn.parts:
                                             if part.text and not sc.output_transcription:
