@@ -18,6 +18,8 @@
 6. **🔇 系统媒体播放与会议声音智能避让**：内置 `AudioPlaybackDetector`，基于 macOS 核心音频机制（<12ms）精准感知 Apple Music、Spotify、Bilibili/YouTube 视频或腾讯会议、飞书、Zoom 等发声状态。当检测到长官正在播放媒体或开会通话时，**绝不冒然插话，自动在后台队列中安静排队**（HUD 动态提示 `[排队待播] 媒体播放中...`），待媒体停止且静音稳定后自动有序汇报。
 7. **🛠️ 本地工程直连执行引擎 (Direct Engineering Engine)**：支持通过口头下发指令（如*“帮我检查一下当前分支状态”*、*“跑一下所有单元测试并汇报”*），内置引擎直接在当前工作区安全执行并语音向您汇报军规级战报。
 8. **🛡️ 硬件回音抑制门限 (Echo Gate) 与双向隔离**：AI 开口回复瞬间自动毫秒级闭麦，彻底消灭外放扬声器引起的音频自激；平时保持静音，绝不干扰您的 Typeless 语音输入法或日常办公。
+9. **🌊 自适应抖动缓冲 (Adaptive Jitter Buffer) 与零丢包平滑流控**：内置 280ms 声卡预充门限与 2000 帧高水位输出管道，联动服务端 `turn_complete` 信号精确控速，彻底消除跨国网络抖动与代理延迟引起的声卡欠载（Underrun）顿挫、爆音与吃字吞句，提供极致丝滑的播音级听感体验。
+10. **🛡️ 常态化 Red Team 技术把关与中立三要素战报（反“报喜不报忧”）**：打破传统 AI 助手盲目顺从与报捷粉饰的局限。语音顾问定位为冷静严谨的高级技术参谋兼结对领航员，日常交互中保持 Red Team 审视视角，直言架构盲区与潜在破损；阶段任务战报严格按照【变更实质、影响范围、遗留风险】三要素精炼短句中立平铺，内容结构清晰，简洁明了，不带赞美修饰，将最终评估裁量权交还长官。
 
 ---
 
@@ -78,14 +80,38 @@ HTTPS_PROXY=http://127.0.0.1:7897
 
 ---
 
-### 3. 一键启动
+### 3. 运行与状态查看 (一键启动 / 状态看板)
 
-在终端或 IDE 底部 Terminal 中运行一键启动脚本：
+已全局注入 `agent-live` 统一管理指令（可在任何终端直接调用）：
+
+```bash
+# 1. 在当前终端即时查看运行状态与健康看板
+agent-live status
+
+# 2. 持续动态刷新监控 (类似 top/htop 刷新)
+agent-live status -w
+
+# 3. 实时查看事件与对讲流水日志
+agent-live logs
+
+# 4. 在当前终端启动前台交互式战况 HUD
+agent-live start
+
+# 5. 重启语音会话并将 HUD 迁移至当前终端
+agent-live restart
+
+# 6. 安全停止语音副驾
+agent-live stop
+```
+
+或直接在 `agent-live` 目录运行脚本：
 ```bash
 ./start.sh
 # 或显式指定所属 IDE 模式（默认 auto 自动探测当前终端所属 IDE，实现专属独立监听）:
 # ./start.sh --ide cursor
 # ./start.sh --ide antigravity
+# 查看运行状态:
+./status.sh
 ```
 > **IDE 隔离与专属通道单例保护**：系统会自动嗅探当前终端属于 **Cursor** 还是 **Antigravity IDE**，自动锁定当前 IDE 正在编辑的专属工程与对话转录。系统内置基于 macOS 内核文件锁（`ChannelInstanceManager`）的通道单例防护，前台交互终端启动时自动平滑接管旧后台实例，严禁同通道多实例并发；底层跨进程音频租约锁（`InterProcessSpeechLease`）在主动汇报与物理声卡播音层实现全面互斥排队，彻底杜绝麦克风抢麦、双会话推流与双扬声器重叠发声。
 
@@ -165,10 +191,13 @@ agent-live/
 ├── .env.example              # 环境变量配置模版 (不含私密凭据)
 ├── .gitignore                # 严密过滤规则 (严格隔离 .env 与虚拟环境)
 ├── README.md                 # 完整实操与架构说明文档
+├── USER_GUIDE.md             # 面向开发者的全功能极速上手指南
 ├── requirements.txt          # Python 核心依赖清单
 ├── start.sh                  # 一键环境自检、依赖自愈与启动脚本 (意外崩溃自动重启)
 ├── stop.sh                   # 显式安全关闭脚本 (写入 STOP 旗标，禁止自动重启)
 ├── restart.sh                # 语音会话重启清理管理器 (一键全量或定向安全重启)
+├── status.py                 # 动态战况诊断仪表盘与进程监控引擎
+├── status.sh                 # 终端快捷状态诊断与看门狗查询脚本
 ├── watchdog.sh               # 独立进程看门狗守护器 (监控 PID / 自动保活与自愈)
 ├── ensure_running.sh         # 跨 IDE 智能感知与看守器 (支持 --ide, --restart, --stop)
 ├── live_sidecar.py           # 核心引擎: Gemini 3.8 Live 双向多模态 WebSocket 管道、PTT调度与强占切断
@@ -181,6 +210,8 @@ agent-live/
 │   ├── tasks.json            # VS Code / Cursor 开箱即用任务配置文件
 │   └── settings.json         # 自动任务静默授权配置
 ├── test_speech_queue.py      # 单通道语音排队、优先级调度与媒体声音避让测试套件
+├── test_jitter_buffer.py     # 自适应抖动缓冲与零丢包音频流水线测试套件
+├── test_consecutive_broadcasts.py # 连续多轮战报独立流式生成与排队测试套件
 ├── test_cursor_transcript_watcher.py # Cursor 转录监听、动作抽取与任务完成口播测试套件
 └── test_*.py                 # 针对强占打断、防抖聚合与执行引擎的单元与集成测试套件
 ```

@@ -297,7 +297,7 @@ class AntigravityRunner:
             f"【长官任务指令】\n{prompt}\n\n"
             "【汇报军规】\n"
             "面向长官汇报时必须雷厉风行、结论先行、军纪严明。\n"
-            "1. 必须以『报告 长官！』起手。\n"
+            "1. 必须以『报告长官！』（长严格读三声 zhǎng）或『报告！』起手。\n"
             "2. 语言极简明扼要，用一到两句话直接向长官汇报核心结果与具体数据（如测试通过数量、分支状态、最新提交或完成状态）。\n"
             "3. 严禁冗长客套与废话。"
         )
@@ -379,9 +379,11 @@ class AntigravityRunner:
                 # 执行成功，提炼最终干练战报
                 clean_lines = [l for l in full_text.split("\n") if not l.startswith("root agent idle")]
                 clean_text = "\n".join(clean_lines).strip()
-                if "报告 长官！" in clean_text:
-                    idx = clean_text.find("报告 长官！")
-                    clean_text = clean_text[idx:]
+                for salutation in ["报告长官！", "报告 长官！", "报告！"]:
+                    if salutation in clean_text:
+                        idx = clean_text.find(salutation)
+                        clean_text = clean_text[idx:]
+                        break
 
                 return clean_text or full_text
 
@@ -453,6 +455,27 @@ class AntigravityRunner:
             except Exception as e:
                 cmd_result = f"测试套件执行异常: {e}"
 
+        elif any(kw in lower_prompt for kw in ["deploy", "部署", "发布", "ship"]):
+            try:
+                ship_script = Path(self.workspace_path) / "scripts" / "ship.sh"
+                if ship_script.exists() and authorized:
+                    sys.stdout.write("[实施工程师] 正在执行一键提交并部署流水线 (scripts/ship.sh)...\n")
+                    sys.stdout.flush()
+                    res = subprocess.run(
+                        ["bash", str(ship_script), "feat: automated voice dispatch commit and deploy"],
+                        cwd=self.workspace_path, capture_output=True, text=True, timeout=300, env=env
+                    )
+                    cmd_result = (
+                        f"[一键提交并部署执行结果]\n退出码: {res.returncode}\n"
+                        f"{res.stdout[-600:] if res.stdout else res.stderr[-600:]}"
+                    )
+                elif not ship_script.exists():
+                    cmd_result = f"当前工程未找到 scripts/ship.sh 部署脚本。"
+                else:
+                    cmd_result = f"[待长官授权] 检测到部署指令。为防止误触生产发布，需长官口头明确确认授权后执行实操发布。"
+            except Exception as e:
+                cmd_result = f"部署流水线执行异常: {e}"
+
         elif any(kw in lower_prompt for kw in ["linter", "check", "检查", "语法"]):
             try:
                 res = subprocess.run(
@@ -481,7 +504,7 @@ class AntigravityRunner:
                     f"实测执行证据:\n{cmd_result}\n\n"
                     f"长官任务指令: {prompt}\n\n"
                     "汇报军规：\n"
-                    "1. 必须以『报告 长官！』起手。\n"
+                    "1. 必须以『报告长官！』（长严格读三声 zhǎng）或『报告！』起手。\n"
                     "2. 语言极简明扼要，用一到两句话直接向长官汇报核心结果与具体数据（如测试通过数量、分支状态、最新提交或完成状态）。\n"
                     "3. 严禁冗长客套。"
                 )
@@ -492,6 +515,6 @@ class AntigravityRunner:
                 )
                 return resp.text.strip()
             except Exception as e:
-                return f"报告 长官！实施工程师已完成执行。执行结论: {cmd_result[:250]} (模型提炼异常: {e})"
+                return f"报告长官！实施工程师已完成执行。执行结论: {cmd_result[:250]} (模型提炼异常: {e})"
         else:
-            return f"报告 长官！实施工程师已完成执行。实测数据: {cmd_result[:300]}"
+            return f"报告长官！实施工程师已完成执行。实测数据: {cmd_result[:300]}"

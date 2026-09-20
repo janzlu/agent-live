@@ -760,7 +760,7 @@ async def run_live_session(
     modules_str = "、".join(project_info["modules"][:15]) if project_info["modules"] else "核心工程模块"
 
     system_instruction_text = (
-        "你是一名顶尖的结对编程副驾兼伴飞派单司令塔（Navigator），拥有字正腔圆、甜美自然、清亮灵动的专业女主播音色，正通过实时双工语音与长官（项目主管兼技术总监）交流协作。\n\n"
+        "你是一名顶尖的高级技术参谋兼结对领航员（Navigator），拥有字正腔圆、冷静沉着、清晰干练、专业严谨的播音音色，正通过实时双工语音与长官（项目主管兼技术总监）交流协作。\n\n"
         "【★ 当前工程与业务边界（最高优先级铁律，严禁超纲臆造）】：\n"
         f"1. 当前锁定的 IDE 工程名称：【{project_info['name']}】；\n"
         f"2. 物理工作区路径：{project_info['path']}；\n"
@@ -773,26 +773,31 @@ async def run_live_session(
         "专有名词可按字母分读（如 A-P-I），但语句骨架必须是标准普通话；\n"
         "2. 【底噪与模糊音节绝对静默铁律（严禁脑补）】：当长官未说话，麦克风仅采集到环境底噪、电流杂音、呼吸声、叹气、按键敲击或模糊不清的零碎音节时，必须保持 100% 绝对静默！绝对严禁凭空臆造任何词句或任务，绝对不可自说自话回答，绝对禁止调用任何工具！\n"
         "3. 只有清晰听到长官完整、有明确意图的发言时才作答；若偶有字音微弱含糊，直接礼貌反问核实：'长官，刚才声音有点模糊，请问您是指...吗？'，绝不擅自揣测派单！\n\n"
-        "【★ 核心语言与发音军规（严守播音品质）】：\n"
-        "1. 【杜绝文字乱念与机械符号朗读】：严禁朗读任何 Markdown 标记（星号、反引号等）与代码符号（花括号、下划线、引号等）；\n"
-        "2. 【简短代称长路径】：严禁朗读长文件路径或 URL，用简短名称（如“主配置文件”、“入口模块”）代称；\n"
-        "3. 【程序员术语标准口语转换】：PR 念“P-R”、API 念“A-P-I”、IDE 念“I-D-E”、UI 念“U-I”、Git 念“Git”、Bug 念“Bug”、Vue 念“View”、SQL 念“S-Q-L”；\n"
-        "4. 【专供耳朵收听的极简口语】：长官是用耳朵收听你的声音，所有语音回复必须是自然简短的口语句子，直奔要害，严禁输出任何长篇大论！\n\n"
+        "【★ 核心语言与发音军规（专供耳朵收听，结构清晰简洁）】：\n"
+        "1. 【内容结构清晰，简洁明了】：长官是用耳朵收听你的声音，所有语音回复必须层次分明、短句直奔要害，字数精炼，绝不输出任何长篇大论、虚头巴脑的口头禅与啰嗦铺垫！\n"
+        "2. 【杜绝文字乱念与机械符号朗读】：严禁朗读任何 Markdown 标记（星号、反引号等）与代码符号（花括号、下划线、引号等）；\n"
+        "3. 【简短代称长路径】：严禁朗读长文件路径或 URL，用简短名称（如“主配置文件”、“入口模块”）代称；\n"
+        "4. 【程序员术语标准口语转换】：PR 念“P-R”、API 念“A-P-I”、IDE 念“I-D-E”、UI 念“U-I”、Git 念“Git”、Bug 念“Bug”、Vue 念“View”、SQL 念“S-Q-L”；\n"
+        "5. 【多音字发音纠正（极关键）】：'长官'中的'长'必须严格读作三声 zhǎng（同'掌'，拼音 zhǎng guān），绝对严禁误读为二声 cháng（常）！禁止在'长'与'官'之间加空格；为确保干练纯正，亦可直接使用『报告！』起手；\n\n"
         "【核心协作分工（模式 A）】：\n"
         "1. IDE 聊天框中的 Antigravity Agent 是『实施工程师』，负责所有代码编写、排查、测试、重构与交付。\n"
-        "2. 你是『结对副驾顾问兼派单司令塔』，作为外部伴飞哨兵，能随时感知 IDE 动态、执行进展与方案细节，并在发生错误或完成时主动预警通报，同时随时接受长官的口头派活。\n"
-        "3. 【称呼与汇报军规】：面向长官的每一次主动通报、预警或回复，必须以『报告 长官！』起手，语言极简明扼要、直奔主题，避免任何冗长客套。\n\n"
+        "2. 你是『结对领航员兼派单司令塔』，作为外部伴飞哨兵，能随时感知 IDE 动态、执行进展与方案细节，并在发生错误或阶段结束时主动通报，同时随时接受长官的口头派活。\n"
+        "3. 【称呼与汇报军规】：面向长官的每一次主动通报、预警或回复，必须以『报告！』或『报告长官！』（长字读三声 zhǎng）利落起手，语言极简明扼要、直奔主题，避免任何冗长客套。\n\n"
+        "【★ 常态化独立技术参谋与 Red Team 把关铁律（坚决破除报喜不报忧）】：\n"
+        "1. 【常态化技术批判视角】：日常对讲、方案解读与技术讨论时，始终保持 Red Team 审视视角。对长官的派单指令或方案，主动寻找架构盲区、安全隐患、边界缺失与潜在破损；\n"
+        "2. 【直言不讳、严禁盲目迎合】：发现隐患或设计缺陷必须直陈利弊，绝不允许无原则附和与谄媚赞美；指出隐患后给出 1 句精炼备选建议，把最终裁量权交还长官；\n"
+        "3. 【战报三要素中立平铺】：通报阶段任务产出时，严格按【变更实质、影响范围、遗留风险】三要素中立通报，不带赞美和情绪倾向，直陈代码客观事实；若信息不足以判断风险，必须如实陈述【信息不足待核验】，严禁凭空臆造！\n\n"
         "【★ 动手执行军规：先主动复述需求，待长官口头确认后方可执行（最高优先级铁律）】：\n"
         "1. 当长官提出工程任务（如修改代码、排查Bug、运行测试等）时，绝对严禁立即私自执行或擅自派单！\n"
-        "2. 第一步（主动复述）：必须先以『报告 长官！』起手，雷厉风行地完整复述长官指令的核心内容与执行范围，并明确请示：\n"
-        "   '报告 长官！收到任务指令：【<精确复述长官需求细节>】，模式为【只读分析 / 授权修改】。请长官确认是否立即执行？'\n"
+        "2. 第一步（主动复述）：必须先以『报告！』或『报告长官！』起手，雷厉风行地完整复述长官指令的核心内容与执行范围，若存在明显技术风险须在复述末尾简短提示，并明确请示：\n"
+        "   '报告！收到任务指令：【<精确复述长官需求细节>】，模式为【只读分析 / 授权修改】。请长官确认是否立即执行？'\n"
         "3. 第二步（长官确认方可执行）：\n"
         "   - 只有长官后续明确回答“确认”、“执行”、“开始”、“去吧”、“没问题”等确认词后，你才允许调用 dispatch_task_to_engineer 工具将任务派发给实施工程师！\n"
         "   - 如果长官说“不对”、“等等”、“取消”或指出偏差，必须立即立正听令并根据长官指正调整复述，坚决服从长官指令，绝不擅自抢跑！\n\n"
         "【零延迟回答与日常规约】：\n"
         "1. 当长官询问'刚才完成了什么'、'现在进度怎么样'、'在干嘛'等问题时：严禁调用工具，直接根据已有记忆用一句话脱口而出！\n"
         "2. 只有长官明确指示'解读方案细节'等问题时，才调用 read_ide_implementation_plan；\n"
-        "3. 遇到日常问候或技术讨论，直接用甜美清亮的普通话回答，绝不调用任何工具！"
+        "3. 遇到日常问候或技术讨论，直接用冷静干练、客观专业的普通话回答，内容结构清晰，简洁明了，绝不调用任何工具！"
     )
 
     client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
@@ -823,10 +828,12 @@ async def run_live_session(
     )
 
     shutdown_event = asyncio.Event()
-    MAX_QUEUE_CAPACITY = 80  # 约 1.6 秒音频帧缓冲，防积压与爆仓
-    audio_in_queue = asyncio.Queue(maxsize=MAX_QUEUE_CAPACITY)
-    audio_out_queue = asyncio.Queue(maxsize=MAX_QUEUE_CAPACITY)
+    MAX_IN_QUEUE_CAPACITY = 80  # 约 1.6 秒麦克风音频帧缓冲，防止人声上传拥塞
+    MAX_OUT_QUEUE_CAPACITY = 2000  # 扩容至 2000 帧（>40秒音频），彻底杜绝大模型高速推流时丢帧吞字
+    audio_in_queue = asyncio.Queue(maxsize=MAX_IN_QUEUE_CAPACITY)
+    audio_out_queue = asyncio.Queue(maxsize=MAX_OUT_QUEUE_CAPACITY)
     is_ai_speaking = False
+    ai_turn_active = False  # 当前是否有活跃的 AI 语音回合正在接收或播放
 
     class SessionMetrics:
         """会话生命周期与稳定性指标监控"""
@@ -864,7 +871,8 @@ async def run_live_session(
     sys.stdout.flush()
 
     def on_unmute_callback():
-        nonlocal is_ai_speaking
+        nonlocal is_ai_speaking, ai_turn_active
+        ai_turn_active = False
         while not audio_out_queue.empty():
             try:
                 audio_out_queue.get_nowait()
@@ -934,8 +942,8 @@ async def run_live_session(
             return False, (
                 "【军规硬门禁拦截】长官尚未在语音中口头下达明确的确认指令！"
                 "根据最高铁律：动手执行任务前，需主动复述需求，长官确认后执行！"
-                "你必须立即以'报告 长官！'开头，用字正腔圆的中文普通话向长官完整复述刚才需求的核心目标与执行范围，"
-                "并明确请示：'报告 长官！收到任务指令：【...】，请长官确认是否立即执行？'，绝对严禁抢跑！"
+                "你必须立即以'报告！'或'报告长官！'开头，用字正腔圆的标准普通话（长读三声 zhǎng）向长官完整复述刚才需求的核心目标与执行范围，"
+                "并明确请示：'报告！收到任务指令：【...】，请长官确认是否立即执行？'，绝对严禁抢跑！"
             )
 
     confirmation_gate = MilitaryConfirmationGate()
@@ -985,65 +993,191 @@ async def run_live_session(
             ptt.last_print_time = now
             ptt.print_status()
 
-    # 扬声器输出流：使用适度缓冲区，杜绝 PortAudio 硬件下溢卡顿
+    # 扬声器输出流：使用自适应最优硬件缓冲区 (blocksize=0)，杜绝 PortAudio 硬件下溢与固定块量化卡顿
     speaker_stream = sd.OutputStream(
         samplerate=OUTPUT_SAMPLE_RATE,
         channels=CHANNELS,
         dtype='int16',
-        blocksize=1024
+        blocksize=0
     )
     speaker_stream.start()
 
-    # 启动后台常驻扬声器播放循环 (集成 Jitter Buffer 与跨进程租约互斥，杜绝网络抖动与多实例串音)
+    # 启动后台常驻扬声器播放循环 (集成自适应 Jitter Buffer 与轻量租约保活，彻底消除断续卡顿)
     async def play_audio_loop():
-        nonlocal is_ai_speaking, speaker_cooldown_until
-        silence_start = None
+        nonlocal is_ai_speaking, ai_turn_active, speaker_cooldown_until
         import time
         speech_lease = InterProcessSpeechLease()
         self_pid = os.getpid()
+        last_lease_renew = 0.0
+
+        # Jitter Buffer 最小起播阈值：280ms (24000 * 0.28 = 6720 样本)
+        MIN_JITTER_SAMPLES = int(OUTPUT_SAMPLE_RATE * 0.28)
 
         try:
             while not shutdown_event.is_set():
+                # 1. 空闲等待阶段：等待第一个音频块到达
                 try:
-                    pcm_chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.12)
+                    pcm_chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.15)
                 except asyncio.TimeoutError:
-                    if is_ai_speaking and audio_out_queue.empty():
-                        now = asyncio.get_running_loop().time()
-                        if silence_start is None:
-                            silence_start = now
-                        elif now - silence_start >= 0.35:
-                            # 超过 350ms 没有任何新音频包且队列为空，说明本轮语音输出彻底结束
-                            is_ai_speaking = False
-                            silence_start = None
-                            speaker_cooldown_until = time.time() + 0.25  # 250ms 消回声安全冷却期
-                            speech_lease.release(self_pid)
+                    if not ai_turn_active and audio_out_queue.empty() and is_ai_speaking:
+                        is_ai_speaking = False
+                        speaker_cooldown_until = time.time() + 0.25
+                        speech_lease.release(self_pid)
                     continue
 
-                silence_start = None
-                is_ai_speaking = True
+                # 2. 起播前自适应预充 (Adaptive Pre-buffering)：
+                # 若此前处于非播放状态，先缓冲约 280ms 音频（或直到本轮 turn_complete），
+                # 彻底吸收跨国网络抖动与本地代理延迟，根治首包播放完后声卡下溢（Underrun）死寂！
+                buffered_chunks = [pcm_chunk]
+                accumulated_samples = len(pcm_chunk)
+                prebuf_deadline = time.time() + 0.35
 
-                # 聚合并行到达的音频块，保持扬声器硬件流水线充盈顺畅，彻底消除断续卡顿
-                chunks = [pcm_chunk]
-                while not audio_out_queue.empty() and len(chunks) < 6:
+                while accumulated_samples < MIN_JITTER_SAMPLES and (ai_turn_active or not audio_out_queue.empty()) and time.time() < prebuf_deadline:
                     try:
-                        chunks.append(audio_out_queue.get_nowait())
+                        next_chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.08)
+                        buffered_chunks.append(next_chunk)
+                        accumulated_samples += len(next_chunk)
+                    except asyncio.TimeoutError:
+                        if not ai_turn_active and audio_out_queue.empty():
+                            break
+
+                while not audio_out_queue.empty() and accumulated_samples < MIN_JITTER_SAMPLES:
+                    try:
+                        c = audio_out_queue.get_nowait()
+                        buffered_chunks.append(c)
+                        accumulated_samples += len(c)
                     except asyncio.QueueEmpty:
                         break
 
-                if len(chunks) == 1:
-                    batch = chunks[0]
-                else:
-                    batch = np.concatenate(chunks)
+                # 3. 标记进入播音状态并获取跨进程租约（仅在起播时请求一次磁盘锁）
+                is_ai_speaking = True
+                speech_lease.acquire(self_pid=self_pid, source=resolved_ide, ttl_sec=4.0)
+                last_lease_renew = time.time()
 
-                # 跨进程物理声卡播音租约加固：确保持有本进程发声锁，杜绝跨宿主踩麦混音
-                speech_lease.acquire(self_pid=self_pid, source=resolved_ide, ttl_sec=3.0)
+                # 播放首批缓冲数据
+                initial_batch = np.concatenate(buffered_chunks) if len(buffered_chunks) > 1 else buffered_chunks[0]
+                await asyncio.to_thread(speaker_stream.write, initial_batch)
 
-                await asyncio.to_thread(speaker_stream.write, batch)
+                # 4. 持续流式写入循环：保持声卡硬件流水线充盈顺畅
+                silence_timeout_start = None
+                while not shutdown_event.is_set():
+                    try:
+                        chunk = await asyncio.wait_for(audio_out_queue.get(), timeout=0.25)
+                        silence_timeout_start = None
+                    except asyncio.TimeoutError:
+                        # 超过 250ms 无新数据：若服务端已宣布 turn_complete，说明整轮播报完毕
+                        if not ai_turn_active and audio_out_queue.empty():
+                            break
+                        # 若持续无新数据且队列为空超过 1.2 秒，强制安全熔断防死锁
+                        if audio_out_queue.empty():
+                            now_t = time.time()
+                            if silence_timeout_start is None:
+                                silence_timeout_start = now_t
+                            elif now_t - silence_timeout_start >= 1.2:
+                                ai_turn_active = False
+                                break
+                        # 若服务端仍在生成（网络波动），继续等待
+                        continue
+
+                    write_chunks = [chunk]
+                    while not audio_out_queue.empty() and len(write_chunks) < 8:
+                        try:
+                            write_chunks.append(audio_out_queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
+
+                    batch = np.concatenate(write_chunks) if len(write_chunks) > 1 else write_chunks[0]
+
+                    # 周期性保活租约（每 1.5 秒仅更新一次，绝不在每帧高频同步阻塞磁盘 I/O）
+                    now = time.time()
+                    if now - last_lease_renew >= 1.5:
+                        speech_lease.heartbeat(self_pid, ttl_sec=4.0)
+                        last_lease_renew = now
+
+                    await asyncio.to_thread(speaker_stream.write, batch)
+
+                # 5. 一轮播报完整结束，释放租约并进入消回声安全冷却期
+                is_ai_speaking = False
+                speaker_cooldown_until = time.time() + 0.25
+                speech_lease.release(self_pid)
+
         finally:
+            is_ai_speaking = False
             speech_lease.release(self_pid)
 
     speaker_task = asyncio.create_task(play_audio_loop())
     keyboard_task = asyncio.create_task(keyboard_listener(ptt, shutdown_event, resolved_ide=resolved_ide))
+
+    # 单通道语音排队调度器（集中仲裁 Cursor、Antigravity、派单回报与媒体避让）
+    async def do_send_speech_prompt(item: SpeechItem):
+        nonlocal ai_turn_active
+        ai_turn_active = True
+        ptt.is_streaming_subtitle = True
+        subtitle_printed = False
+
+        try:
+            # 采用独立流式通道实时生成语音，直接流式推入 audio_out_queue，彻底打破单长连接多轮文本 Prompt 限制
+            async with asyncio.timeout(15.0):
+                async with client.aio.live.connect(model=model_name, config=config) as ann_session:
+                    content = types.Content(role="user", parts=[types.Part.from_text(text=item.prompt_text)])
+                    await ann_session.send_client_content(turns=content, turn_complete=True)
+
+                    async for resp in ann_session.receive():
+                        if shutdown_event.is_set():
+                            break
+                        sc = resp.server_content
+                        if sc:
+                            if sc.output_transcription and sc.output_transcription.text:
+                                if not subtitle_printed:
+                                    sys.stdout.write("\r\033[K\033[1;35m[AI字幕]\033[0m ")
+                                    subtitle_printed = True
+                                sys.stdout.write(sc.output_transcription.text)
+                                sys.stdout.flush()
+
+                            if sc.model_turn:
+                                for part in sc.model_turn.parts:
+                                    if part.text and not sc.output_transcription:
+                                        if not subtitle_printed:
+                                            sys.stdout.write("\r\033[K\033[1;35m[AI字幕]\033[0m ")
+                                            subtitle_printed = True
+                                        sys.stdout.write(part.text)
+                                        sys.stdout.flush()
+                                    if part.inline_data and part.inline_data.mime_type.startswith("audio/pcm"):
+                                        audio_chunk = np.frombuffer(part.inline_data.data, dtype=np.int16)
+                                        if len(audio_chunk) > 0:
+                                            try:
+                                                audio_out_queue.put_nowait(audio_chunk)
+                                            except asyncio.QueueFull:
+                                                pass
+
+                            if sc.generation_complete or sc.turn_complete:
+                                break
+        except Exception as e:
+            ptt.write_log(f"\033[1;31m[播报生成异常] {e}\033[0m")
+            logger.warning(f"Error in do_send_speech_prompt: {e}")
+        finally:
+            if subtitle_printed:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            ptt.is_streaming_subtitle = False
+            ai_turn_active = False
+
+    speech_coordinator = SpeechCoordinator(
+        self_pid=os.getpid(),
+        workspace=workspace_root,
+        is_user_speaking_fn=lambda: ptt.is_active,
+        is_local_ai_speaking_fn=lambda: is_ai_speaking,
+        is_audio_busy_fn=lambda: (not audio_out_queue.empty() or is_ai_speaking or ai_turn_active),
+        send_speech_fn=do_send_speech_prompt,
+        update_hud_fn=lambda msg: ptt.update_dashboard(advisor_status=msg[:30]),
+        silence_stabilization_sec=0.5,
+    )
+    def combined_on_unmute():
+        on_unmute_callback()
+        speech_coordinator.cancel_transient()
+
+    ptt.on_unmute = combined_on_unmute
+    coordinator_task = asyncio.create_task(speech_coordinator.worker_loop(shutdown_event))
 
     ws_send_lock = asyncio.Lock()
     is_first_connect = True
@@ -1090,24 +1224,6 @@ async def run_live_session(
                         print("\033[1;32m[Live API 保持] ✓ 会话重连成功，语音伴随已就绪！\033[0m\n")
 
                     ptt.print_status()
-
-                    # 单通道语音排队调度器（集中仲裁 Cursor、Antigravity、派单回报与媒体避让）
-                    async def do_send_speech_prompt(item: SpeechItem):
-                        content = types.Content(role="user", parts=[types.Part.from_text(text=item.prompt_text)])
-                        async with ws_send_lock:
-                            await session.send_client_content(turns=content, turn_complete=True)
-
-                    speech_coordinator = SpeechCoordinator(
-                        self_pid=os.getpid(),
-                        workspace=workspace_root,
-                        is_user_speaking_fn=lambda: ptt.is_active,
-                        is_local_ai_speaking_fn=lambda: is_ai_speaking,
-                        is_audio_busy_fn=lambda: (not audio_out_queue.empty()),
-                        send_speech_fn=do_send_speech_prompt,
-                        update_hud_fn=lambda msg: ptt.update_dashboard(advisor_status=msg[:30]),
-                        silence_stabilization_sec=0.5,
-                    )
-                    ptt.on_unmute = speech_coordinator.cancel_transient
 
                     # 任务 A: 麦克风音频流式发送
                     async def send_mic_loop():
@@ -1224,22 +1340,30 @@ async def run_live_session(
 
                         try:
                             clean_task = sanitize_for_speech(task_desc, max_chars=60)
-                            clean_out = sanitize_for_speech(task_output, max_chars=360)
+                            clean_out = sanitize_for_speech(task_output, max_chars=360).strip() or "实施工程师未返回详细输出日志"
                             if is_error:
                                 prompt_text = (
                                     f"[系统警报: 实施工程师执行长官派单任务遇到异常]\n"
                                     f"派单任务: {clean_task}\n"
                                     f"异常输出要点: {clean_out}\n\n"
-                                    f"【发音军规】: 必须以'报告 长官！'开头，用 2 到 3 句标准普通话汇报："
-                                    f"说明异常位置、核心原因、建议下一步。严禁朗读代码符号或文件路径！"
+                                    f"【发音与表达军规（强制要求）】: 必须以'报告长官！'（长读三声 zhǎng）或'报告！'起手，"
+                                    f"内容结构清晰，简洁明了，用恰好 2 句短小精悍的普通话通报：\n"
+                                    f"第1句说明受阻位置与核心异常原因；\n"
+                                    f"第2句说明建议的排查或处置方向。\n"
+                                    f"严禁朗读代码符号、括号或长路径，直奔要害！"
                                 )
                             else:
                                 prompt_text = (
-                                    f"[系统通知: 实施工程师已完成长官派发任务 ({mode_str})]\n"
+                                    f"[系统战报: 实施工程师已执行长官派单任务 ({mode_str})]\n"
                                     f"派单任务: {clean_task}\n"
-                                    f"执行结论要点: {clean_out}\n\n"
-                                    f"【发音军规】: 必须以'报告 长官！'开头，用 2 到 3 句标准普通话汇报："
-                                    f"说明派单已完成，概括核心成果与影响面。严禁念出代码符号或文件路径！"
+                                    f"执行输出与结论: {clean_out}\n\n"
+                                    f"【发音与表达军规（三要素中立平铺，强制要求，绝不粉饰报喜）】:\n"
+                                    f"必须以'报告长官！'（长读三声 zhǎng）或'报告！'起手，内容结构清晰，简洁明了，"
+                                    f"用恰好 3 句精炼短句（60~90字）中立通报，严禁使用赞美词，把裁量权交还长官：\n"
+                                    f"第1句【变更实质】：客观直陈落地了什么核心改动或机制；\n"
+                                    f"第2句【影响范围】：明确受波及的模块边界与影响面；\n"
+                                    f"第3句【遗留风险】：严苛点出输出中的隐患（如缺乏单测、未覆盖异常分支、未消 Warning 或待办），若信息不足必须直陈【信息不足待核验】，严禁臆造！\n"
+                                    f"严禁朗读代码符号、下划线或文件路径！"
                                 )
 
                             await speech_coordinator.enqueue(
@@ -1269,6 +1393,7 @@ async def run_live_session(
                                         # 1. 检测服务端打断信号：仅当长官主动开麦或全双工模式下才允许打断！
                                         if sc.interrupted:
                                             if ptt.is_active or ptt.always_listen:
+                                                ai_turn_active = False
                                                 while not audio_out_queue.empty():
                                                     try:
                                                         audio_out_queue.get_nowait()
@@ -1311,11 +1436,11 @@ async def run_live_session(
                                             sys.stdout.write(sc.output_transcription.text)
                                             sys.stdout.flush()
 
-                                        # 5. 处理语音音频数据包 (带防爆仓抛弃老帧机制)
+                                        # 5. 处理语音音频数据包 (严禁正常播报中丢包，确保 100% 完整流畅)
                                         if sc.model_turn:
                                             if not ptt.always_listen and ptt.is_active:
                                                 ptt.mute()
-                                            is_ai_speaking = True
+                                            ai_turn_active = True
                                             for part in sc.model_turn.parts:
                                                 if part.text and not sc.output_transcription:
                                                     if not ai_subtitle_streaming:
@@ -1326,18 +1451,15 @@ async def run_live_session(
                                                     sys.stdout.flush()
                                                 if part.inline_data and part.inline_data.mime_type.startswith("audio/pcm"):
                                                     audio_chunk = np.frombuffer(part.inline_data.data, dtype=np.int16)
-                                                    if audio_out_queue.full():
+                                                    if len(audio_chunk) > 0:
                                                         try:
-                                                            audio_out_queue.get_nowait()
-                                                        except Exception:
+                                                            audio_out_queue.put_nowait(audio_chunk)
+                                                        except asyncio.QueueFull:
                                                             pass
-                                                    try:
-                                                        audio_out_queue.put_nowait(audio_chunk)
-                                                    except asyncio.QueueFull:
-                                                        pass
 
                                         # 6. 一轮对话完成，强制静音麦克风，杜绝空闲底噪与回音误触发
                                         if sc.turn_complete:
+                                            ai_turn_active = False
                                             if ai_subtitle_streaming:
                                                 sys.stdout.write("\n")
                                                 sys.stdout.flush()
@@ -1483,7 +1605,7 @@ async def run_live_session(
                                                                     "authorized": allow_mod,
                                                                     "message": (
                                                                         f"任务【{task_prompt}】已成功分派至后台实施工程师执行（{'已授权实操' if allow_mod else '只读分析'}）。"
-                                                                        f"请立即用极其干练的一句话向长官回执（必须以'报告 长官！'开头）：'报告 长官！任务已派发给实施工程师，正在执行：{task_prompt[:35]}，请稍候。'，"
+                                                                        f"请立即用极其干练的一句话向长官回执（以'报告长官！'或'报告！'开头）：'报告长官！任务已派发给实施工程师，正在执行：{task_prompt[:35]}，请稍候。'，"
                                                                         "并说明在此期间长官可以随时继续正常交谈。"
                                                                     )
                                                                 }
@@ -1510,14 +1632,18 @@ async def run_live_session(
                         ptt.write_log(f"\033[1;32m[{src_title} 状态感知] 实施工程师已完成任务: {task_name[:50]}\033[0m")
 
                         clean_task = sanitize_for_speech(task_name, max_chars=60)
-                        clean_summary = sanitize_for_speech(summary, max_chars=420)
+                        clean_summary = sanitize_for_speech(summary, max_chars=420).strip() or "实施工程师未返回具体细节日志"
                         prompt_text = (
-                            f"[系统通知: {src_title} 实施工程师已完成任务]\n"
-                            f"任务: {clean_task}\n"
-                            f"完成要点: {clean_summary}\n\n"
-                            f"【发音军规】: 必须以'报告 长官！'开头，用标准普通话做 2 到 3 句战报："
-                            f"第1句说明任务已完成；第2句概括 2 到 3 个关键结论或改动；"
-                            f"若有风险或待办，第3句简要提醒。严禁念代码符号、括号、下划线或文件路径。"
+                            f"[系统战报: {src_title} 实施工程师已结束阶段任务]\n"
+                            f"任务指令: {clean_task}\n"
+                            f"执行产出与结论: {clean_summary}\n\n"
+                            f"【发音与表达军规（三要素中立平铺，强制要求，绝不粉饰报喜）】:\n"
+                            f"必须以'报告长官！'（长读三声 zhǎng）或'报告！'起手，内容结构清晰，简洁明了，"
+                            f"用恰好 3 句精炼短句（60~90字）中立通报，严禁使用赞美词，把裁量权交还长官：\n"
+                            f"第1句【变更实质】：客观直陈落地了什么核心改动或机制；\n"
+                            f"第2句【影响范围】：明确受波及的模块边界与影响面；\n"
+                            f"第3句【遗留风险】：严苛点出输出中的隐患（如缺乏单测、未覆盖异常分支、未消 Warning 或待办），若信息不足必须直陈【信息不足待核验】，严禁臆造！\n"
+                            f"严禁朗读代码符号、下划线或文件路径！"
                         )
                         await speech_coordinator.enqueue(
                             SpeechItem(
@@ -1545,7 +1671,7 @@ async def run_live_session(
                             f"[紧急预警: {src_title} 实施工程师执行出错]\n"
                             f"操作动作: {clean_act}\n"
                             f"报错核心原因: {clean_err}\n\n"
-                            f"【发音军规】: 请用清晰利落的女主播语气（必须以'报告 长官！'开头），用一句纯正自然的中文普通话向长官说明哪项任务遇到什么问题。严禁朗读任何代码符号或文件路径！"
+                            f"【发音与表达军规】: 请用清晰利落的参谋语气（建议以'报告长官！'或'报告！'开头，长读三声 zhǎng），内容结构清晰，简洁明了，用 2 句短小精悍的普通话说明哪项任务遇到什么核心阻断及排查建议。严禁朗读任何代码符号或文件路径！"
                         )
                         await speech_coordinator.enqueue(
                             SpeechItem(
@@ -1571,8 +1697,8 @@ async def run_live_session(
                         prompt_text = (
                             f"[{src_title} 实施工程师伴随解说]\n"
                             f"施工进展: {clean_narration}\n\n"
-                            f"请用标准普通话向长官播报当前进展（控制在 28 到 40 字）："
-                            f"说明正在做什么、对象是什么；切勿寒暄，严禁念出技术符号与绝对路径。"
+                            f"请用冷静清晰的普通话向长官播报当前进展（控制在 25 到 35 字）："
+                            f"内容结构清晰，简洁明了，说明正在做什么、对象是什么；切勿寒暄，严禁念出技术符号与绝对路径。"
                         )
                         await speech_coordinator.enqueue(
                             SpeechItem(
@@ -1589,23 +1715,6 @@ async def run_live_session(
                         src_title = "Cursor" if source == "cursor" else "Antigravity"
                         ptt.update_dashboard(ide_action=f"新需求: {req[:25]}")
                         ptt.write_log(f"\033[1;34m[{src_title} 状态感知] 监测到长官发送了新需求: {req[:60]}...\033[0m")
-                        try:
-                            clean_req = sanitize_for_speech(req, max_chars=80)
-                            c = types.Content(
-                                role="user",
-                                parts=[
-                                    types.Part.from_text(
-                                        text=(
-                                            f"[系统静默记忆: 长官在 {src_title} 下达了新需求: \"{clean_req}\"，实施工程师已接单分析中。"
-                                            f"此条仅供记忆储备，无需发声。]"
-                                        )
-                                    )
-                                ]
-                            )
-                            async with ws_send_lock:
-                                await session.send_client_content(turns=c, turn_complete=False)
-                        except Exception:
-                            pass
 
                     watcher_tasks = []
                     if resolved_ide in ("antigravity", "all"):
@@ -1631,11 +1740,10 @@ async def run_live_session(
                         )
                         watcher_tasks.append(asyncio.create_task(cursor_watcher.start(shutdown_event)))
 
-                    # 并发执行输入、接收、语音排队协调与专属 IDE 监听（仅发生异常时退出重连）
+                    # 并发执行输入、接收与专属 IDE 监听（仅发生异常时退出重连）
                     core_tasks = [
                         asyncio.create_task(send_mic_loop()),
                         asyncio.create_task(receive_loop()),
-                        asyncio.create_task(speech_coordinator.worker_loop(shutdown_event)),
                     ]
                     done, pending = await asyncio.wait(
                         core_tasks + watcher_tasks,
@@ -1657,6 +1765,8 @@ async def run_live_session(
                     break
                 metrics.reconnect_count += 1
                 ptt.write_log(f"\033[1;33m[Live API 保持] ⚠️ 会话连接波动 ({err})，正在自动恢复重连... (第{metrics.reconnect_count}次, 1.5秒后)\033[0m")
+                ai_turn_active = False
+                is_ai_speaking = False
                 while not audio_in_queue.empty():
                     try:
                         audio_in_queue.get_nowait()
@@ -1681,6 +1791,7 @@ async def run_live_session(
             except Exception:
                 pass
         keyboard_task.cancel()
+        coordinator_task.cancel()
         speaker_task.cancel()
         speaker_stream.stop()
         speaker_stream.close()
@@ -1694,7 +1805,7 @@ def main():
     parser.add_argument("--test-audio", action="store_true", help="自检录音与回放")
     parser.add_argument("--workspace", type=str, default=None, help="Antigravity 目标工程根目录 (默认自动探测 IDE 当前活跃工程)")
     parser.add_argument("--model", type=str, default=os.getenv("LIVE_MODEL_NAME", "models/gemini-3.8-live"), help="Live API 模型")
-    parser.add_argument("--voice", type=str, default=os.getenv("VOICE_NAME", "Zephyr"), help="语音音色 (女声推荐: Zephyr-清亮甜美女主播/默认, Leda-年轻元气女主播, Kore-沉稳干练女官; 男声: Puck, Charon, Fenrir)")
+    parser.add_argument("--voice", type=str, default=os.getenv("VOICE_NAME", "Zephyr"), help="语音音色 (推荐: Zephyr-清晰沉稳参谋女声/默认, Kore-干练严谨女官, Leda-年轻清朗女声; 男声: Puck, Charon, Fenrir)")
     parser.add_argument("--always-listen", action="store_true", help="禁用 Push-to-Talk，开启全双工持续监听常驻")
     parser.add_argument("--vad-silence-ms", type=int, default=int(os.getenv("VAD_SILENCE_MS", "1500")), help="静音断句容忍延时 (毫秒，默认 1500ms，为长官预留充足说话思考时间)")
     parser.add_argument("--auto-reply", action="store_true", default=os.getenv("AUTO_REPLY", "false").lower() in ("true", "1", "yes"), help="开启停顿自动回复（默认关闭，采用手动确认对讲模式：开麦畅所欲言，说完再次按 Ctrl+Space 确认发送，彻底杜绝抢话打断）")

@@ -70,6 +70,8 @@ class SpeechCoordinator:
         self._lock = asyncio.Lock()
         self._is_broadcasting = False
         self._pending_play_event = asyncio.Event()
+        self._last_blocked_reason: str = ""
+        self._blocked_since: float = 0.0
 
     @property
     def queue_size(self) -> int:
@@ -154,6 +156,16 @@ class SpeechCoordinator:
             # 检测当前放行门限
             can_speak, reason = self.check_can_speak()
             if not can_speak:
+                now_t = time.time()
+                if self._last_blocked_reason != reason:
+                    self._last_blocked_reason = reason
+                    self._blocked_since = now_t
+                elif now_t - self._blocked_since >= 8.0:
+                    # 持续阻塞超过 8 秒，打印调试信息
+                    self._blocked_since = now_t
+                    if self.update_hud_fn:
+                        self.update_hud_fn(f"[持续待播] {reason} (队列: {len(self._queue)})")
+
                 if self.update_hud_fn:
                     self.update_hud_fn(f"[排队待播] {reason} (队列: {len(self._queue)})")
                 try:
@@ -161,6 +173,10 @@ class SpeechCoordinator:
                 except (asyncio.CancelledError, KeyboardInterrupt):
                     break
                 continue
+
+            # 成功放行，清空阻塞计时
+            self._last_blocked_reason = ""
+            self._blocked_since = 0.0
 
             # 静音稳定期二次确认 (避免音乐刚巧微停顿或语间喘息时冒然插话)
             if self.silence_stabilization_sec > 0:
@@ -204,14 +220,16 @@ class SpeechCoordinator:
                 if self.send_speech_fn:
                     await self.send_speech_fn(item)
 
-                # 等待本地语音彻底播报完毕
+                # 等待本地语音彻底播报完毕（设 20 秒安全硬超时，防止声卡状态偶发脱节卡死）
                 wait_time = 0.0
-                while (self.is_local_ai_speaking_fn() or self.is_audio_busy_fn()) and wait_time < 30.0:
-                    await asyncio.sleep(0.15)
-                    wait_time += 0.15
+                while (self.is_local_ai_speaking_fn() or self.is_audio_busy_fn()) and wait_time < 20.0:
+                    if shutdown_event.is_set():
+                        break
+                    await asyncio.sleep(0.12)
+                    wait_time += 0.12
 
-                # 播报完毕，额外冷却 0.4s 防止连续播报黏连
-                await asyncio.sleep(0.4)
+                # 播报完毕，额外冷却 0.35s 防止连续播报黏连
+                await asyncio.sleep(0.35)
 
             except Exception as err:
                 print(f"[SpeechCoordinator 异常] {err}")
