@@ -204,9 +204,22 @@ def sanitize_for_speech(text: str, max_chars: int = 180) -> str:
     text = re.sub(r"[-=]{3,}", "", text)
     # 9. 下划线转换为空格（避免将 GEMINI_API_KEY 拼读成乱码词）
     text = re.sub(r"_", " ", text)
-    # 10. 过滤 markdown 语法符号与常用编程括号符号
+    # 10. 驼峰命名智能拆词 (如 getUserProfile -> get User Profile; LiveConnectConfig -> Live Connect Config)
+    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", text)
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+    # 11. 英文单词间连字符转换为空格 (如 agent-live -> agent live)
+    text = re.sub(r"(?<=[a-zA-Z0-9])-(?=[a-zA-Z0-9])", " ", text)
+    # 12. 中英文字符与数字交界处自动补空格（防中英混读粘连、防吞声嘴瓢）
+    text = re.sub(r"([a-zA-Z0-9])([\u4e00-\u9fa5])", r"\1 \2", text)
+    text = re.sub(r"([\u4e00-\u9fa5])([a-zA-Z0-9])", r"\1 \2", text)
+    # 13. 程序员高频字母缩写规范分读 (如 API -> A-P-I, PR -> P-R, UI -> U-I)
+    acronyms = ["API", "PR", "IDE", "UI", "SQL", "CLI", "SDK", "HUD", "PTT", "JSON", "PID", "TTS", "URL", "HTTP", "HTTPS"]
+    for acr in acronyms:
+        spaced = "-".join(list(acr))
+        text = re.sub(rf"(?<![a-zA-Z0-9]){acr}(?![a-zA-Z0-9])", spaced, text, flags=re.IGNORECASE)
+    # 14. 过滤 markdown 语法符号与常用编程括号符号
     text = re.sub(r"[#*`~>\[\]{}<>]", "", text)
-    # 11. 过滤常见工具前置元数据
+    # 15. 过滤常见工具前置元数据
     lines = []
     for l in text.split("\n"):
         l_str = l.strip()
@@ -217,6 +230,22 @@ def sanitize_for_speech(text: str, max_chars: int = 180) -> str:
         lines.append(l_str)
     cleaned = " ".join(lines)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    # 16. 气口优化：对过长无标点语句插入自然停顿，预留呼吸气口，缓解语速过赶导致的嘴瓢
+    parts = re.split(r"([，。！？；,\.!\?;:\n])", cleaned)
+    res = []
+    for i in range(0, len(parts), 2):
+        seg = parts[i]
+        punc = parts[i+1] if i + 1 < len(parts) else ""
+        if len(seg) > 16:
+            seg = re.sub(r"(?<=[^\s，。！？；])(并且|以及|通过|支持|进行|使得|已经|正在|包括|导致|同时)", r"，\1", seg)
+            seg = re.sub(r"，([^，]{1,4})，", r"，\1 ", seg)
+            seg = re.sub(r"，{2,}", "，", seg)
+        res.append(seg + punc)
+    cleaned = "".join(res)
+    cleaned = re.sub(r"\s*，\s*", "，", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
     if len(cleaned) > max_chars:
         cut = cleaned[:max_chars]
         last_punc = max(cut.rfind("。"), cut.rfind("！"), cut.rfind("；"), cut.rfind("，"))
