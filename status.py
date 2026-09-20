@@ -164,7 +164,7 @@ def render_status_dashboard():
     # 4. 云端多模态配置
     out.append(f"\n{C_BOLD}● 引擎与模型通道 (Model & Network){C_RESET}")
     out.append(f"  • 实时多模态模型: {C_CYAN}{model_name}{C_RESET}")
-    out.append(f"  • 播音音色名称:   {C_CYAN}{voice_name}{C_RESET} (北方官话播音腔)")
+    out.append(f"  • 播音音色名称:   {C_CYAN}{voice_name}{C_RESET} (国标普通话播音标准)")
     out.append(f"  • 网络代理通道:   {C_DIM}{http_proxy}{C_RESET}")
 
     # 5. 最近事件与交互流水
